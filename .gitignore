@@ -1,0 +1,32 @@
+
+build/verilator
+build/verilator/
+build/verilator/.
+bfg-1.14.0.jar
+
+# Build artifacts
+build/
+*.o
+*.elf
+*.bin
+*.hex
+*.dump
+# Simulation outputs
+sim/waveforms/*.vcd
+sim/waveforms/*.fst
+sim/waveforms/*.vcd.gz
+# Verilator generated files
+obj_dir/
+*.d
+# Editor and IDE files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+# OS files
+.DS_Store
+Thumbs.db
+# Temporary files
+*.tmp
+*.bak

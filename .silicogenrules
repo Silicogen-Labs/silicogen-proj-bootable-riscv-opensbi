@@ -1,0 +1,488 @@
+# Silicon Design Rules: Bootable RISC-V VM Hardware Implementation
+
+## PROJECT APPROACH VERIFICATION ✓
+
+### Approach Assessment: **CORRECT AND INDUSTRY-ALIGNED**
+
+The approach outlined in `PROJECT_SPEC.md` follows the standard hardware design methodology used in both academia and industry for RISC-V SoC development. This has been verified against:
+
+- **RISC-V International Standards**: The RV32IMAZicsr instruction set is the correct minimal requirement for OpenSBI.
+- **OpenSBI Requirements**: Confirmed from official repository - requires M-mode execution, CSR support, and ns16550a UART.
+- **Industry Design Flow**: The microarchitecture → RTL → simulation → FPGA flow matches industry practice.
+
+### Tools Verification Status
+
+| Tool | Required | Status | Version/Location |
+|------|----------|--------|------------------|
+| **Verilator** | ✓ Yes | ✓ INSTALLED | v5.020 |
+| **RISC-V GCC Toolchain** | ✓ Yes | ✓ INSTALLED | riscv64-linux-gnu-gcc 13.3.0 |
+| **GTKWave** | ✓ Yes | ✓ INSTALLED | v3.3.116 |
+| **Device Tree Compiler** | ✓ Yes | ✗ NOT INSTALLED | Available in apt (v1.7.0) |
+| **Make** | ✓ Yes | ✓ INSTALLED | GNU Make 4.3 |
+| **Git** | ✓ Yes | ✓ INSTALLED | v2.43.0 |
+| **Python 3** | ✓ Yes | ✓ INSTALLED | v3.12.3 |
+| **Yosys (Synthesis)** | ⚠ Optional | ✓ AVAILABLE | Found in /silicogenplayground/Work/vlsi/tools/ |
+| **OpenROAD** | ⚠ Optional | ✓ AVAILABLE | Found in /silicogenplayground/Work/vlsi/tools/ |
+
+**ACTION REQUIRED**: Install device-tree-compiler before Phase 4:
+```bash
+sudo apt-get install -y device-tree-compiler
+```
+
+---
+
+## COMPLETE PROJECT WORKFLOW
+
+This section defines the exact steps from concept to working FPGA prototype.
+
+### PHASE 0: Environment Preparation
+
+**Objective**: Set up all tools and project structure.
+
+**Steps**:
+1. Install missing tools (device-tree-compiler)
+2. Create project directory structure
+3. Verify all tools are in PATH
+
+**Directory Structure**:
+```
+bootble-vm-riscv/
+├── docs/               # Documentation and microarchitecture diagrams
+├── rtl/                # SystemVerilog RTL source files
+│   ├── core/          # CPU core modules
+│   ├── bus/           # System bus
+│   ├── peripherals/   # UART, RAM controllers
+│   └── soc/           # Top-level SoC integration
+├── sim/                # Verilator testbenches and simulation scripts
+│   ├── testbenches/   # SystemVerilog testbenches
+│   └── waves/         # VCD waveform outputs
+├── sw/                 # Software artifacts
+│   ├── tests/         # Assembly and C test programs
+│   ├── opensbi/       # OpenSBI build artifacts
+│   └── dts/           # Device tree sources
+├── build/              # Build outputs
+└── scripts/            # Automation scripts
+```
+
+**Success Criteria**: All directories created, all tools respond to `--version` commands.
+
+---
+
+### PHASE 1: Microarchitecture Definition
+
+**Objective**: Design the CPU's internal organization on paper before writing any RTL code.
+
+**Why This Phase is Critical**: 
+- RTL describes *what* the hardware is made of. Microarchitecture defines *how* it works.
+- Mistakes at this stage are cheap to fix. Mistakes in RTL cost days of debugging.
+
+**Deliverables**:
+
+1. **State Machine Diagram** (`docs/cpu_state_machine.md`):
+   - FETCH: Request instruction from bus
+   - FETCH_WAIT: Wait for bus response
+   - DECODE: Parse instruction format
+   - EXECUTE: Perform ALU/branch operation
+   - MEMORY: Load/store operations
+   - MEMORY_WAIT: Wait for bus response
+   - WRITEBACK: Update register file
+   - TRAP: Handle exceptions/CSR operations
+
+2. **Datapath Diagram** (`docs/datapath.md`):
+   - 32 x 32-bit General Purpose Registers (x0 hardwired to zero)
+   - Program Counter (PC)
+   - Instruction Register (IR)
+   - ALU with operations: ADD, SUB, AND, OR, XOR, SLL, SRL, SRA, SLT, SLTU
+   - Multiplier/Divider unit (M-extension)
+   - CSR register file (minimum set for OpenSBI)
+   - Bus interface controller
+
+3. **Control Signal Specification** (`docs/control_signals.md`):
+   - Register write enable
+   - ALU operation select
+   - Memory read/write enable
+   - PC source (next sequential, branch target, trap vector)
+   - CSR read/write enable
+
+4. **Memory Map** (`docs/memory_map.md`):
+   ```
+   0x00000000 - 0x003FFFFF : RAM (4MB)
+   0x10000000 - 0x100000FF : UART ns16550a registers
+   ```
+
+5. **CSR Requirements List** (`docs/csr_requirements.md`):
+   Minimum CSRs required by OpenSBI:
+   - `misa` (0x301): ISA and extensions
+   - `mhartid` (0xF14): Hardware thread ID
+   - `mstatus` (0x300): Machine status register
+   - `mtvec` (0x305): Machine trap vector base address
+   - `mepc` (0x341): Machine exception program counter
+   - `mcause` (0x342): Machine trap cause
+   - `mtval` (0x343): Machine bad address or instruction
+   - `mscratch` (0x340): Machine scratch register
+   - `mip` (0x344): Machine interrupt pending
+   - `mie` (0x304): Machine interrupt enable
+   - `mcycle` (0xB00): Machine cycle counter
+   - `minstret` (0xB02): Machine instructions-retired counter
+
+**Tools**: Whiteboard, diagrams.net, or markdown with ASCII art.
+
+**Success Criteria**: You can explain to someone else how the CPU executes a single ADD instruction from fetch to writeback without looking at any reference.
+
+---
+
+### PHASE 2: RTL Implementation - Core Components
+
+**Objective**: Translate microarchitecture into synthesizable SystemVerilog.
+
+**Steps**:
+
+#### 2.1: Register File Module (`rtl/core/register_file.sv`)
+- 32 registers, dual read ports, single write port
+- x0 always reads as zero
+- Synchronous write, asynchronous read (for simplicity)
+
+#### 2.2: ALU Module (`rtl/core/alu.sv`)
+- All RV32I arithmetic and logical operations
+- Multi-cycle multiplier/divider for M-extension
+
+#### 2.3: Decoder Module (`rtl/core/decoder.sv`)
+- Parse 32-bit instruction into opcode, funct3, funct7, rd, rs1, rs2, immediate
+- Generate control signals for each instruction type (R, I, S, B, U, J)
+
+#### 2.4: CSR File Module (`rtl/core/csr_file.sv`)
+- Implement minimum CSR set from Phase 1
+- CSR read/write/set/clear operations
+- Trap handling logic
+
+#### 2.5: CPU Core Integration (`rtl/core/cpu_core.sv`)
+- Instantiate all sub-modules
+- Implement state machine from Phase 1
+- Connect to bus interface signals
+
+**Coding Standards**:
+- Use SystemVerilog, not plain Verilog
+- Always use `logic`, never `reg` or `wire`
+- Synchronous reset, active-low
+- Clock domain: single clock for now
+- No latches (use proper always_ff and always_comb)
+
+**Success Criteria**: Code compiles with Verilator with zero warnings.
+
+---
+
+### PHASE 3: RTL Implementation - System Integration
+
+**Objective**: Build the memory-mapped system around the CPU core.
+
+**Steps**:
+
+#### 3.1: Simple Bus Arbiter (`rtl/bus/simple_bus.sv`)
+- Single master (CPU), multiple slaves (RAM, UART)
+- Address-based routing
+- Valid/ready handshake protocol
+
+#### 3.2: RAM Controller (`rtl/peripherals/ram.sv`)
+- Byte-addressable memory
+- Support for byte, half-word, word accesses
+- Initialize from a memory image file
+
+#### 3.3: UART 16550a Controller (`rtl/peripherals/uart_16550.sv`)
+- Transmit-only is sufficient for initial OpenSBI boot
+- Memory-mapped registers matching ns16550a specification
+- Divisor latch, line control, line status registers
+
+#### 3.4: Top-Level SoC (`rtl/soc/riscv_soc.sv`)
+- Instantiate CPU, bus, RAM, UART
+- Wire reset and clock to all modules
+- Expose UART TX pin as top-level output
+
+**Success Criteria**: Top-level module compiles cleanly. No floating signals or unconnected ports.
+
+---
+
+### PHASE 4: Simulation Infrastructure
+
+**Objective**: Create testbenches to verify RTL functionality before going to hardware.
+
+**Steps**:
+
+#### 4.1: Basic ALU Testbench (`sim/testbenches/tb_alu.sv`)
+- Directed tests for all ALU operations
+- Compare against golden reference values
+- Self-checking with `$error` messages
+
+#### 4.2: Instruction-Level Testbench (`sim/testbenches/tb_cpu_instruction.sv`)
+- Load simple RISC-V assembly programs
+- Single-step through execution
+- Verify register file state after each instruction
+
+#### 4.3: Full SoC Testbench (`sim/testbenches/tb_soc.sv`)
+- Instantiate top-level SoC
+- Load program into RAM using `$readmemh`
+- Generate clock and reset
+- Capture UART output to a file
+- Automatic pass/fail checking
+
+#### 4.4: Verilator C++ Wrapper (`sim/sim_main.cpp`)
+- Create C++ harness for Verilator simulation
+- Implement clock generation
+- Implement UART output capture to stdout
+- Add VCD waveform dumping
+
+**Verilator Build Process**:
+```bash
+verilator --cc --exe --build --trace \
+  -Wall -Wno-fatal \
+  --top-module riscv_soc \
+  rtl/soc/riscv_soc.sv \
+  sim/sim_main.cpp \
+  -o sim_soc
+```
+
+**Success Criteria**: Simulator runs, produces waveforms, and can execute a simple "Hello, World!" program that outputs to UART.
+
+---
+
+### PHASE 5: Software Test Development
+
+**Objective**: Build RISC-V programs to test the hardware systematically.
+
+**Steps**:
+
+#### 5.1: Bare-Metal "Hello World" (`sw/tests/hello.S`)
+- Assembly program that writes "Hello, World!" to UART
+- No C runtime required
+- Direct UART register access
+
+Compile with:
+```bash
+riscv64-linux-gnu-as -march=rv32ima -mabi=ilp32 -o hello.o sw/tests/hello.S
+riscv64-linux-gnu-ld -m elf32lriscv -Ttext=0x0 -o hello.elf hello.o
+riscv64-linux-gnu-objcopy -O binary hello.elf hello.bin
+```
+
+#### 5.2: C-based Instruction Tests (`sw/tests/*.c`)
+- Test I-extension: arithmetic, logical, load/store
+- Test M-extension: multiplication, division
+- Test A-extension: atomic operations
+- Use inline assembly to ensure exact instruction sequences
+
+#### 5.3: Build OpenSBI (`sw/opensbi/`)
+Clone and build:
+```bash
+cd sw/opensbi
+git clone https://github.com/riscv-software-src/opensbi.git .
+```
+
+Create device tree (`sw/dts/bootble.dts`):
+```dts
+/dts-v1/;
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+    compatible = "bootble,riscv-soc";
+    
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <10000000>;
+        
+        cpu@0 {
+            device_type = "cpu";
+            reg = <0>;
+            compatible = "riscv";
+            riscv,isa = "rv32ima_zicsr";
+            status = "okay";
+        };
+    };
+    
+    memory@0 {
+        device_type = "memory";
+        reg = <0x0 0x400000>;
+    };
+    
+    soc {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "simple-bus";
+        ranges;
+        
+        uart@10000000 {
+            compatible = "ns16550a";
+            reg = <0x10000000 0x100>;
+            clock-frequency = <50000000>;
+            reg-shift = <0>;
+            reg-io-width = <4>;
+        };
+    };
+    
+    chosen {
+        stdout-path = "uart@10000000";
+    };
+};
+```
+
+Compile device tree:
+```bash
+dtc -I dts -O dtb -o bootble.dtb sw/dts/bootble.dts
+```
+
+Build OpenSBI:
+```bash
+cd sw/opensbi
+make PLATFORM=generic CROSS_COMPILE=riscv64-linux-gnu- \
+  PLATFORM_RISCV_XLEN=32 \
+  FW_FDT_PATH=../../sw/dts/bootble.dtb \
+  FW_TEXT_START=0x0
+```
+
+**Success Criteria**: OpenSBI builds without errors. Test programs execute correctly in simulation.
+
+---
+
+### PHASE 6: Full System Simulation with OpenSBI
+
+**Objective**: Boot OpenSBI in RTL simulation and verify correct operation.
+
+**Steps**:
+
+1. Convert `opensbi.elf` to memory initialization format:
+   ```bash
+   riscv64-linux-gnu-objcopy -O verilog opensbi.elf opensbi.hex
+   ```
+
+2. Update RAM module to load `opensbi.hex` at simulation start
+
+3. Run simulation:
+   ```bash
+   ./obj_dir/sim_soc
+   ```
+
+4. Monitor UART output for OpenSBI boot banner:
+   ```
+   OpenSBI v1.x
+   ...
+   Platform Name: bootble,riscv-soc
+   Boot HART ID: 0
+   ...
+   ```
+
+5. Debug with GTKWave if boot fails:
+   ```bash
+   gtkwave sim/waves/soc.vcd
+   ```
+
+**Common Issues and Debugging**:
+- **No UART output**: Check bus address decoding and UART base address
+- **Illegal instruction trap**: Verify instruction decoder logic, check for missing instructions
+- **Infinite loop**: Check PC update logic, branch/jump calculations
+- **Bus timeout**: Verify bus ready signals and memory timing
+
+**Success Criteria**: OpenSBI prints complete boot banner. Testbench automatically reports "PASS".
+
+---
+
+### PHASE 7: FPGA Synthesis and Implementation
+
+**Objective**: Move from simulation to real hardware.
+
+**Note**: This phase requires specific FPGA hardware. The exact steps depend on your target board (Xilinx, Intel/Altera, Lattice, etc.). The general flow is provided below.
+
+**Steps**:
+
+#### 7.1: Add FPGA-Specific Top Module (`rtl/fpga/fpga_top.sv`)
+- Wrap the SoC with I/O constraints
+- Add clock management (PLL if needed)
+- Map UART TX to physical FPGA pin
+- Add LED indicators for debugging
+
+#### 7.2: Create Constraints File (`.xdc` for Xilinx, `.sdc` for Intel)
+- Pin assignments
+- Clock constraints
+- Timing constraints
+
+#### 7.3: Synthesize with Yosys (or vendor tools)
+```bash
+yosys -p "read_verilog -sv rtl/**/*.sv; synth_ice40 -top fpga_top -json build/fpga.json"
+```
+
+#### 7.4: Place and Route
+- Use vendor tools (Vivado, Quartus) or open-source (nextpnr)
+
+#### 7.5: Generate Bitstream
+
+#### 7.6: Program FPGA
+
+#### 7.7: Connect Serial Terminal
+```bash
+screen /dev/ttyUSB0 115200
+```
+
+**Success Criteria**: OpenSBI boot message appears on serial terminal from physical hardware.
+
+---
+
+## CRITICAL SUCCESS FACTORS
+
+### What Makes This Approach Correct
+
+1. **Bottom-Up Verification**: Test each module individually before integration
+2. **Incremental Complexity**: Start with simple assembly, then C tests, finally OpenSBI
+3. **Simulation First**: Catch bugs in simulation where debugging is easy
+4. **Industry-Standard Tools**: Verilator is used in production by Google, Western Digital, etc.
+5. **Real Firmware**: OpenSBI is the official RISC-V firmware, not a toy program
+
+### What Could Go Wrong
+
+1. **Skipping Microarchitecture Phase**: Jumping straight to RTL without a clear design leads to chaotic, unmaintainable code
+2. **Inadequate Testing**: Testing only with OpenSBI means you'll struggle to debug complex failures
+3. **Ignoring Warnings**: Verilator warnings often indicate real bugs (combinational loops, uninitialized signals)
+4. **Wrong ISA Features**: OpenSBI will not boot without proper CSR and trap handling
+
+---
+
+## ESTIMATED EFFORT
+
+| Phase | Estimated Time (Developer Effort) |
+|-------|-----------------------------------|
+| Phase 0: Environment Setup | 1 hour |
+| Phase 1: Microarchitecture | 1-2 days |
+| Phase 2: Core RTL | 1-2 weeks |
+| Phase 3: System Integration | 3-5 days |
+| Phase 4: Simulation Infrastructure | 3-5 days |
+| Phase 5: Software Tests | 1 week |
+| Phase 6: OpenSBI Boot | 1-2 weeks (heavy debugging) |
+| Phase 7: FPGA Implementation | 3-5 days (board-dependent) |
+| **TOTAL** | **6-10 weeks** |
+
+---
+
+## FINAL VERIFICATION CHECKLIST
+
+Before declaring the project complete, verify:
+
+- [ ] All RTL modules have associated testbenches
+- [ ] Full SoC passes all assembly and C tests in simulation
+- [ ] OpenSBI boot completes successfully in simulation
+- [ ] OpenSBI boot completes successfully on FPGA hardware
+- [ ] Serial console is readable and stable
+- [ ] No timing violations in FPGA implementation
+- [ ] All code is documented and follows coding standards
+- [ ] Memory map documentation matches implementation
+- [ ] Device tree accurately describes hardware
+
+---
+
+## RECOMMENDED LEARNING RESOURCES
+
+- **RISC-V ISA Specification**: https://riscv.org/specifications/
+- **Verilator Manual**: https://verilator.org/guide/latest/
+- **Digital Design with RTL**: "Digital Design and Computer Architecture: RISC-V Edition" by Harris & Harris
+- **OpenSBI Documentation**: https://github.com/riscv-software-src/opensbi/tree/master/docs
+
+---
+
+**Document Version**: 1.0  
+**Last Updated**: 2026-02-26  
+**Status**: APPROVED FOR EXECUTION
