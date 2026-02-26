@@ -1,27 +1,30 @@
 `timescale 1ns / 1ps
 
-module tb_soc;
-    // Clock and reset
-    logic clk;
-    logic rst_n;
+module tb_soc(
+    input logic clk,
+    input logic rst_n
+);
+    // Clock and reset driven from C++
     
     // UART interface
     logic uart_tx;
     
+    // Test program selection (can be overridden with +define+TEST_PROGRAM=...)
+    `ifndef TEST_PROGRAM
+        `define TEST_PROGRAM "build/hello.hex"
+    `endif
+    
     // Instantiate the SoC with test program loaded
     riscv_soc #(
-        .MEM_INIT_FILE("build/hello.hex")
+        .MEM_INIT_FILE(`TEST_PROGRAM)
     ) dut (
         .clk(clk),
         .rst_n(rst_n),
         .uart_tx(uart_tx)
     );
     
-    // Clock generation: 50MHz (20ns period)
-    initial begin
-        clk = 0;
-        forever #10 clk = ~clk;
-    end
+    // Clock generation: Driven from C++ sim_main.cpp
+    // (50MHz = 20ns period, 10ns per edge)
     
     // UART monitor - capture transmitted characters
     logic [7:0] uart_char;
@@ -71,74 +74,38 @@ module tb_soc;
         end
     end
     
+    // Test result checking
+    localparam TEST_RESULT_BASE = 32'h3F00;
+    localparam TEST_STATUS_ADDR = 32'h3FFC;
+    localparam TEST_MAGIC_DONE  = 32'hDEADBEEF;
+    int test_passed_count = 0;
+    int test_failed_count = 0;
+    int test_total_count = 0;
+    
     // Main test procedure
+    // With --no-timing and C++ driving clock, testbench is simplified
+    // Test checking will be done in C++
+    // VCD dumping handled in C++ sim_main.cpp
     initial begin
-        $dumpfile("sim/waveforms/tb_soc.vcd");
-        $dumpvars(0, tb_soc);
-        
-        // Display memory contents for debugging
         $display("=== Starting RISC-V SoC Simulation ===");
-        $display("Time: %0t", $time);
-        
-        // Reset sequence (active low)
-        rst_n = 0;
-        repeat(10) @(posedge clk);
-        rst_n = 1;
-        $display("Reset released at time %0t", $time);
-        
-        // Let it run for a while to print message
-        $display("Waiting for UART output...");
-        
-        // Trace execution through print_loop iterations
-        repeat(20) @(posedge clk);
-        $display("\n=== Tracing print_loop execution ===");
-        $display("Expected flow: 0x14->0x18->0x1C->0x20->0x24->0x28->0x2C->0x30->0x14 (loop)");
-        for (int i = 0; i < 300; i++) begin
-            @(posedge clk);
-            // Track all state transitions in the print_loop region
-            if (dut.u_cpu_core.pc >= 32'h14 && dut.u_cpu_core.pc <= 32'h34) begin
-                if (dut.u_cpu_core.state == 1) begin // FETCH
-                    $display("[%0t] FETCH     PC=0x%02h | a0=0x%h t0=0x%h t1=0x%h", 
-                             $time, dut.u_cpu_core.pc,
-                             dut.u_cpu_core.u_register_file.registers[10],
-                             dut.u_cpu_core.u_register_file.registers[5],
-                             dut.u_cpu_core.u_register_file.registers[6]);
-                end
-                else if (dut.u_cpu_core.state == 4) begin // EXECUTE
-                    $display("[%0t] EXECUTE   PC=0x%02h | alu_result=0x%h branch_taken=%b is_jal=%b is_jalr=%b", 
-                             $time, dut.u_cpu_core.pc, dut.u_cpu_core.alu_result,
-                             dut.u_cpu_core.branch_taken, dut.u_cpu_core.is_jal, dut.u_cpu_core.is_jalr);
-                end
-                else if (dut.u_cpu_core.state == 7) begin // WRITEBACK
-                    $display("[%0t] WRITEBACK PC=0x%02h | rd=x%0d we=%b data=0x%h next_pc=0x%h", 
-                             $time, dut.u_cpu_core.pc, dut.u_cpu_core.rd,
-                             dut.u_cpu_core.rf_rd_we, dut.u_cpu_core.rf_rd_data, dut.u_cpu_core.next_pc);
-                end
-            end
-        end
-        $display("=== End trace ===\n");
-        
-        repeat(2000000) @(posedge clk);
-        
-        // Check if we got any UART output
-        $display("\n=== Simulation Complete ===");
-        $display("Final PC: 0x%08h", dut.u_cpu_core.pc);
-        $display("Total cycles: %0d", $time / 20);
-        
-        $finish;
+        $display("Testbench initialized, clock driven from C++");
     end
     
-    // Timeout watchdog
-    initial begin
-        #100_000_000; // 100ms timeout
-        $display("\n=== TIMEOUT ===");
-        $display("Simulation timed out at %0t", $time);
-        $finish;
-    end
+    // Timeout handled in C++ sim_main.cpp
     
-    // Monitor CPU state and UART writes
+    // Monitor CPU state and memory/UART writes
     always @(posedge clk) begin
         if (rst_n) begin            
+            // Monitor RAM writes to test result area
+            if (dut.u_simple_bus.ram_req && dut.u_simple_bus.ram_we) begin
+                if (dut.u_simple_bus.ram_addr >= 32'h3F00 && dut.u_simple_bus.ram_addr < 32'h4000) begin
+                    $display("[%0t] RAM WRITE: addr=0x%h data=0x%h (PC=0x%h)", 
+                             $time, dut.u_simple_bus.ram_addr, 
+                             dut.u_simple_bus.ram_wdata,
+                             dut.u_cpu_core.pc);
+                end
+            end
+            
             // Monitor UART accesses
             if (dut.u_simple_bus.uart_req) begin
                 if (dut.u_simple_bus.uart_we) begin
@@ -150,10 +117,13 @@ module tb_soc;
                 end
             end
             
-            // Monitor key register writes to a0 (x10)
-            if (dut.u_cpu_core.rf_rd_we && dut.u_cpu_core.rf_rd_addr == 10) begin
-                $display("[%0t] *** REG x10 (a0) <= 0x%h (PC=0x%h)", 
-                         $time, dut.u_cpu_core.rf_rd_data, dut.u_cpu_core.pc);
+            // Monitor ALL register writes when in first test area (PC 0x54-0x84)
+            // Also monitor x30 (t5) and x31 (t6) writes always in test area
+            if (dut.u_cpu_core.pc >= 32'h54 && dut.u_cpu_core.pc <= 32'h90) begin
+                if (dut.u_cpu_core.rf_rd_we) begin
+                    $display("[%0t] REG x%0d <= 0x%08h (PC=0x%h)", 
+                             $time, dut.u_cpu_core.rf_rd_addr, dut.u_cpu_core.rf_rd_data, dut.u_cpu_core.pc);
+                end
             end
         end
     end

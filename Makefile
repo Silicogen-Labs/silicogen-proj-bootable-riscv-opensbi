@@ -16,7 +16,7 @@ RISCV_OBJCOPY = $(RISCV_PREFIX)objcopy
 RISCV_OBJDUMP = $(RISCV_PREFIX)objdump
 
 # Verilator flags
-VFLAGS = --cc --exe --build --trace --timing
+VFLAGS = --cc --exe --build --trace --no-timing
 VFLAGS += -Wall -Wno-fatal
 VFLAGS += --top-module tb_soc
 VFLAGS += -I$(RTL_DIR)/core
@@ -47,16 +47,18 @@ TB_SOURCES = $(SIM_DIR)/testbenches/tb_soc.sv
 # C++ simulation files
 CPP_SOURCES = $(SIM_DIR)/sim_main.cpp
 
-# Software test files
-TEST_PROGRAM = $(TEST_DIR)/hello.S
-TEST_ELF = $(BUILD_DIR)/hello.elf
-TEST_BIN = $(BUILD_DIR)/hello.bin
-TEST_HEX = $(BUILD_DIR)/hello.hex
-TEST_DUMP = $(BUILD_DIR)/hello.dump
+# Software test files (can override with TEST=test_name)
+TEST ?= hello
+TEST_PROGRAM = $(TEST_DIR)/$(TEST).S
+TEST_ELF = $(BUILD_DIR)/$(TEST).elf
+TEST_BIN = $(BUILD_DIR)/$(TEST).bin
+TEST_HEX = $(BUILD_DIR)/$(TEST).hex
+TEST_DUMP = $(BUILD_DIR)/$(TEST).dump
 
 # RISC-V compiler flags
 RISCV_CFLAGS = -march=rv32ima_zicsr -mabi=ilp32 -nostdlib -nostartfiles
 RISCV_CFLAGS += -Ttext=0x00000000 -static -fno-common -fno-builtin
+RISCV_CFLAGS += -I$(TEST_DIR)  # Include test directory for test_framework.h
 RISCV_LDFLAGS = -Ttext=0x00000000 -nostdlib -static
 
 # Default target
@@ -70,9 +72,9 @@ $(BUILD_DIR):
 $(WAVE_DIR):
 	mkdir -p $(WAVE_DIR)
 
-# Compile test program
+# Compile test program (with C preprocessor for .include support)
 $(TEST_ELF): $(TEST_PROGRAM) | $(BUILD_DIR)
-	$(RISCV_CC) $(RISCV_CFLAGS) $(RISCV_LDFLAGS) -o $@ $<
+	$(RISCV_CC) -x assembler-with-cpp $(RISCV_CFLAGS) $(RISCV_LDFLAGS) -o $@ $<
 
 $(TEST_BIN): $(TEST_ELF)
 	$(RISCV_OBJCOPY) -O binary $< $@
@@ -94,13 +96,14 @@ sw: $(TEST_HEX) $(TEST_DUMP)
 # Verilator simulation
 .PHONY: sim
 sim: $(BUILD_DIR) $(WAVE_DIR)
-	$(VERILATOR) $(VFLAGS) $(RTL_SOURCES) $(TB_SOURCES) $(shell pwd)/$(CPP_SOURCES)
-	@echo "=== Running simulation ==="
-	./$(BUILD_DIR)/verilator/Vtb_soc
+	$(VERILATOR) $(VFLAGS) -DTEST_PROGRAM=\"$(TEST_HEX)\" $(RTL_SOURCES) $(TB_SOURCES) $(shell pwd)/$(CPP_SOURCES)
+	@echo "=== Verilator build complete ==="
 
 # Run simulation with specific test
 .PHONY: run
 run: sw sim
+	@echo "=== Running simulation with $(TEST) ==="
+	./$(BUILD_DIR)/verilator/Vtb_soc
 
 # View waveforms
 .PHONY: wave
@@ -125,6 +128,26 @@ distclean: clean
 lint:
 	$(VERILATOR) --lint-only $(VFLAGS) $(RTL_SOURCES) $(TB_SOURCES)
 
+# Run all tests
+.PHONY: test-all
+test-all:
+	@echo "=== Running All Tests ==="
+	@echo ""
+	@for test in test_alu test_memory test_branch test_muldiv; do \
+		echo "========================================"; \
+		echo "Running $$test..."; \
+		echo "========================================"; \
+		$(MAKE) clean >/dev/null 2>&1; \
+		$(MAKE) TEST=$$test sw sim >/dev/null 2>&1; \
+		if $(MAKE) TEST=$$test run | grep -q "ALL TESTS PASSED"; then \
+			echo "✓ $$test: PASSED"; \
+		else \
+			echo "✗ $$test: FAILED"; \
+		fi; \
+		echo ""; \
+	done
+	@echo "=== All Tests Complete ==="
+
 # Help
 .PHONY: help
 help:
@@ -132,11 +155,16 @@ help:
 	@echo "==================="
 	@echo "Targets:"
 	@echo "  all        - Build and run simulation (default)"
-	@echo "  sim        - Compile and run Verilator simulation"
+	@echo "  sim        - Compile Verilator simulation"
 	@echo "  sw         - Build software test program"
 	@echo "  run        - Build software and run simulation"
+	@echo "  test-all   - Run all test programs automatically"
 	@echo "  wave       - View waveforms in GTKWave"
 	@echo "  lint       - Lint RTL with Verilator"
 	@echo "  clean      - Clean build artifacts"
 	@echo "  distclean  - Clean everything"
 	@echo "  help       - Show this help message"
+	@echo ""
+	@echo "Variables:"
+	@echo "  TEST       - Specify test program (default: hello)"
+	@echo "               Example: make TEST=test_alu run"

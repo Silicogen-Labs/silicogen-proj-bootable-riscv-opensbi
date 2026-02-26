@@ -87,6 +87,7 @@ module cpu_core (
     logic [1:0]  csr_op;
     logic        csr_we, csr_illegal;
     logic        trap_taken;
+    logic        trap_detected;  // Combinational signal that detects trap condition
     logic [31:0] trap_pc, trap_value;
     logic [3:0]  trap_cause;
     logic        is_interrupt;
@@ -104,6 +105,7 @@ module cpu_core (
     logic [1:0] mem_width;
     logic       mem_unsigned;
     logic       branch_taken;
+    logic       branch_taken_latched;  // Latched version for WRITEBACK
     
     // Working registers
     logic [31:0] alu_result_reg;
@@ -211,8 +213,11 @@ module cpu_core (
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= STATE_RESET;
+            trap_taken <= 1'b0;
         end else begin
             state <= next_state;
+            // Pulse trap_taken high for one cycle when entering STATE_TRAP
+            trap_taken <= (next_state == STATE_TRAP && state != STATE_TRAP);
         end
     end
     
@@ -248,7 +253,10 @@ module cpu_core (
             end
             
             STATE_EXECUTE: begin
-                if (is_load || is_store) begin
+                // Check for traps first (highest priority)
+                if (trap_detected) begin
+                    next_state = STATE_TRAP;
+                end else if (is_load || is_store) begin
                     next_state = STATE_MEMORY;
                 end else if (is_mul || is_div) begin
                     // Wait for mul/div to complete
@@ -318,23 +326,22 @@ module cpu_core (
                     next_pc = pc + imm;  // JAL target
                 end else if (is_jalr) begin
                     next_pc = (rf_rs1_data + imm) & ~32'h1;  // JALR target (clear LSB)
+                end else if (mret) begin
+                    next_pc = mepc_out;  // Return from trap
                 end
             end
             
             STATE_WRITEBACK: begin
                 // Only advance PC for sequential execution
-                // Jumps and taken branches already updated PC in EXECUTE
-                if (!is_jal && !is_jalr && !(is_branch && branch_taken)) begin
+                // Jumps, taken branches, and MRET already updated PC in EXECUTE
+                if (!is_jal && !is_jalr && !mret && !(is_branch && branch_taken_latched)) begin
                     next_pc = pc_plus_4;  // Sequential execution
                 end
             end
             
             STATE_TRAP: begin
-                if (mret) begin
-                    next_pc = mepc_out;
-                end else begin
-                    next_pc = mtvec_base;
-                end
+                // Jump to trap handler
+                next_pc = mtvec_base;
             end
         endcase
     end
@@ -393,6 +400,7 @@ module cpu_core (
             alu_result_reg <= alu_result;
             reg_write_enable_latched <= reg_write_enable;
             reg_write_source_latched <= reg_write_source;
+            branch_taken_latched <= branch_taken;  // Latch branch decision
         end
     end
     
@@ -498,7 +506,7 @@ module cpu_core (
         csr_op = 2'b00;
         csr_we = 1'b0;
         mret = 1'b0;
-        trap_taken = 1'b0;
+        trap_detected = 1'b0;  // Combinational trap detection
         trap_pc = pc;
         trap_cause = 4'h0;
         trap_value = 32'h0;
@@ -634,7 +642,7 @@ module cpu_core (
                     if (imm == 32'h302) begin
                         mret = 1'b1;
                     end else begin
-                        trap_taken = 1'b1;
+                        trap_detected = 1'b1;
                         trap_cause = (imm == 32'h1) ? 4'h3 : 4'hB;  // EBREAK : ECALL
                     end
                 end else begin
@@ -660,21 +668,21 @@ module cpu_core (
         
         // Handle illegal instruction trap
         if (state == STATE_DECODE && illegal_instruction) begin
-            trap_taken = 1'b1;
+            trap_detected = 1'b1;
             trap_cause = 4'h2;  // Illegal instruction
             trap_value = instruction;
         end
         
         // Handle instruction fetch error
         if (state == STATE_FETCH_WAIT && ibus_ready && ibus_error) begin
-            trap_taken = 1'b1;
+            trap_detected = 1'b1;
             trap_cause = 4'h1;  // Instruction access fault
             trap_value = pc;
         end
         
         // Handle data access error
         if (state == STATE_MEMORY_WAIT && dbus_ready && dbus_error) begin
-            trap_taken = 1'b1;
+            trap_detected = 1'b1;
             trap_cause = is_load ? 4'h5 : 4'h7;  // Load/Store access fault
             trap_value = dbus_addr;
         end
