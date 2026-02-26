@@ -49,6 +49,7 @@ module cpu_core (
     
     // Instruction Register
     logic [31:0] instruction;
+    logic        instruction_valid;  // Set when instruction is fetched successfully
     
     // Decoded instruction fields (from decoder)
     logic [6:0]  opcode;
@@ -91,7 +92,12 @@ module cpu_core (
     logic [31:0] trap_pc, trap_value;
     logic [3:0]  trap_cause;
     logic        is_interrupt;
+    // Latched trap information for CSR file
+    logic [31:0] trap_pc_latched, trap_value_latched;
+    logic [3:0]  trap_cause_latched;
+    logic        is_interrupt_latched;
     logic        mret;
+    logic        mret_latched;  // Latched version for WRITEBACK
     logic [31:0] mtvec_base, mepc_out;
     
     // Control signals
@@ -195,10 +201,10 @@ module cpu_core (
         .csr_rdata         (csr_rdata),
         .csr_illegal       (csr_illegal),
         .trap_taken        (trap_taken),
-        .trap_pc           (trap_pc),
-        .trap_cause        (trap_cause),
-        .trap_value        (trap_value),
-        .is_interrupt      (is_interrupt),
+        .trap_pc           (trap_pc_latched),
+        .trap_cause        (trap_cause_latched),
+        .trap_value        (trap_value_latched),
+        .is_interrupt      (is_interrupt_latched),
         .mret              (mret),
         .mtvec_base        (mtvec_base),
         .mepc_out          (mepc_out),
@@ -214,10 +220,23 @@ module cpu_core (
         if (!rst_n) begin
             state <= STATE_RESET;
             trap_taken <= 1'b0;
+            trap_pc_latched <= 32'h0;
+            trap_value_latched <= 32'h0;
+            trap_cause_latched <= 4'h0;
+            is_interrupt_latched <= 1'b0;
         end else begin
             state <= next_state;
             // Pulse trap_taken high for one cycle when entering STATE_TRAP
-            trap_taken <= (next_state == STATE_TRAP && state != STATE_TRAP);
+            // Also latch trap information at this time
+            if (next_state == STATE_TRAP && state != STATE_TRAP) begin
+                trap_taken <= 1'b1;
+                trap_pc_latched <= trap_pc;
+                trap_value_latched <= trap_value;
+                trap_cause_latched <= trap_cause;
+                is_interrupt_latched <= is_interrupt;
+            end else begin
+                trap_taken <= 1'b0;
+            end
         end
     end
     
@@ -269,7 +288,12 @@ module cpu_core (
             end
             
             STATE_MEMORY: begin
-                next_state = STATE_MEMORY_WAIT;
+                // Check for address misalignment traps
+                if (trap_detected) begin
+                    next_state = STATE_TRAP;
+                end else begin
+                    next_state = STATE_MEMORY_WAIT;
+                end
             end
             
             STATE_MEMORY_WAIT: begin
@@ -334,7 +358,7 @@ module cpu_core (
             STATE_WRITEBACK: begin
                 // Only advance PC for sequential execution
                 // Jumps, taken branches, and MRET already updated PC in EXECUTE
-                if (!is_jal && !is_jalr && !mret && !(is_branch && branch_taken_latched)) begin
+                if (!is_jal && !is_jalr && !mret_latched && !(is_branch && branch_taken_latched)) begin
                     next_pc = pc_plus_4;  // Sequential execution
                 end
             end
@@ -356,9 +380,16 @@ module cpu_core (
     end
     
     // Latch instruction
-    always_ff @(posedge clk) begin
-        if (state == STATE_FETCH_WAIT && ibus_ready && !ibus_error) begin
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            instruction <= 32'h0;
+            instruction_valid <= 1'b0;
+        end else if (state == STATE_FETCH_WAIT && ibus_ready && !ibus_error) begin
             instruction <= ibus_rdata;
+            instruction_valid <= 1'b1;
+        end else if (state == STATE_WRITEBACK || state == STATE_TRAP) begin
+            // Clear valid flag after writeback/trap to prevent reusing old instruction
+            instruction_valid <= 1'b0;
         end
     end
     
@@ -401,6 +432,7 @@ module cpu_core (
             reg_write_enable_latched <= reg_write_enable;
             reg_write_source_latched <= reg_write_source;
             branch_taken_latched <= branch_taken;  // Latch branch decision
+            mret_latched <= mret;  // Latch MRET decision
         end
     end
     
@@ -666,8 +698,33 @@ module cpu_core (
             end
         end
         
-        // Handle illegal instruction trap
-        if (state == STATE_DECODE && illegal_instruction) begin
+        // Handle instruction address misalignment
+        if (state == STATE_EXECUTE && (is_branch || is_jal || is_jalr || mret)) begin
+            logic [31:0] target_pc;
+            
+            // Calculate target PC based on instruction type
+            if (is_branch && branch_taken) begin
+                target_pc = pc + imm;
+            end else if (is_jal) begin
+                target_pc = pc + imm;
+            end else if (is_jalr) begin
+                target_pc = (rf_rs1_data + imm) & ~32'h1;
+            end else if (mret) begin
+                target_pc = mepc_out;
+            end else begin
+                target_pc = pc;
+            end
+            
+            // Check if target PC is 4-byte aligned
+            if (target_pc[1:0] != 2'b00) begin
+                trap_detected = 1'b1;
+                trap_cause = 4'h0;  // Instruction address misaligned
+                trap_value = target_pc;
+            end
+        end
+        
+        // Handle illegal instruction trap (only for valid instructions)
+        if (state == STATE_DECODE && illegal_instruction && instruction_valid) begin
             trap_detected = 1'b1;
             trap_cause = 4'h2;  // Illegal instruction
             trap_value = instruction;
@@ -678,6 +735,30 @@ module cpu_core (
             trap_detected = 1'b1;
             trap_cause = 4'h1;  // Instruction access fault
             trap_value = pc;
+        end
+        
+        // Handle load/store address misalignment
+        if (state == STATE_MEMORY && (is_load || is_store)) begin
+            // Check address alignment based on access size (funct3[1:0])
+            case (funct3[1:0])
+                2'b01: begin  // Halfword (2-byte) access
+                    if (alu_result[0] != 1'b0) begin  // Must be 2-byte aligned
+                        trap_detected = 1'b1;
+                        trap_cause = is_load ? 4'h4 : 4'h6;  // Load/Store address misaligned
+                        trap_value = alu_result;
+                    end
+                end
+                2'b10: begin  // Word (4-byte) access
+                    if (alu_result[1:0] != 2'b00) begin  // Must be 4-byte aligned
+                        trap_detected = 1'b1;
+                        trap_cause = is_load ? 4'h4 : 4'h6;  // Load/Store address misaligned
+                        trap_value = alu_result;
+                    end
+                end
+                default: begin  // Byte access - no alignment requirement
+                    // No trap
+                end
+            endcase
         end
         
         // Handle data access error

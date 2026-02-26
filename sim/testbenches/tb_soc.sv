@@ -89,6 +89,13 @@ module tb_soc(
     initial begin
         $display("=== Starting RISC-V SoC Simulation ===");
         $display("Testbench initialized, clock driven from C++");
+
+        #1; // Wait a moment for Verilator to initialize and load memory
+        $display("--- Initial Memory Content (First 16 Words) ---");
+        for (int i=0; i<16; i++) begin
+            $display("MEM[0x%h] = 0x%h", i*4, dut.u_ram.memory[i]);
+        end
+        $display("-------------------------------------------------");
     end
     
     // Timeout handled in C++ sim_main.cpp
@@ -117,14 +124,7 @@ module tb_soc(
                 end
             end
             
-            // Monitor ALL register writes when in first test area (PC 0x54-0x84)
-            // Also monitor x30 (t5) and x31 (t6) writes always in test area
-            if (dut.u_cpu_core.pc >= 32'h54 && dut.u_cpu_core.pc <= 32'h90) begin
-                if (dut.u_cpu_core.rf_rd_we) begin
-                    $display("[%0t] REG x%0d <= 0x%08h (PC=0x%h)", 
-                             $time, dut.u_cpu_core.rf_rd_addr, dut.u_cpu_core.rf_rd_data, dut.u_cpu_core.pc);
-                end
-            end
+
         end
     end
 
