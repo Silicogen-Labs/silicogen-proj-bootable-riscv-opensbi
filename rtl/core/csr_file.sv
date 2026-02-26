@@ -26,9 +26,18 @@ module csr_file (
     output logic [31:0] mtvec_base,
     output logic [31:0] mepc_out,
     
+    // Interrupt enable outputs
+    output logic        mstatus_mie_out,
+    output logic        mie_mtie_out,
+    output logic        mie_msie_out,
+    output logic        mip_msip_out,
+    
     // Counter inputs
     input  logic        count_cycle,
-    input  logic        count_instret
+    input  logic        count_instret,
+    
+    // Interrupt inputs
+    input  logic        timer_irq
 );
 
     // CSR address definitions
@@ -95,6 +104,14 @@ module csr_file (
 
     // Machine Interrupt Pending (mip)
     logic [31:0] mip;
+    logic        mip_msip;  // [3] Machine Software Interrupt Pending (writable)
+    
+    // Update mip with interrupt inputs (MTIP is read-only, driven by timer_irq)
+    always_comb begin
+        mip = 32'h0;
+        mip[3] = mip_msip;     // MSIP - software interrupt (writable)
+        mip[7] = timer_irq;    // MTIP - timer interrupt (read-only, driven by hardware)
+    end
 
     // Machine Cycle Counter (mcycle/mcycleh)
     logic [63:0] mcycle;
@@ -181,7 +198,7 @@ module csr_file (
             mtval        <= 32'h00000000;
             mscratch     <= 32'h00000000;
             mie          <= 32'h00000000;
-            mip          <= 32'h00000000;
+            mip_msip     <= 1'b0;
             mcycle       <= 64'h0;
             minstret     <= 64'h0;
         end else begin
@@ -250,7 +267,7 @@ module csr_file (
                     
                     CSR_MIP: begin
                         // Software can write MSIP, others are read-only
-                        mip[3] <= csr_write_data[3];  // MSIP
+                        mip_msip <= csr_write_data[3];  // MSIP
                     end
                     
                     CSR_MCYCLE: begin
@@ -285,7 +302,11 @@ module csr_file (
     end
 
     // Output assignments
-    assign mtvec_base = mtvec;
-    assign mepc_out   = mepc;
+    assign mtvec_base      = mtvec;
+    assign mepc_out        = mepc;
+    assign mstatus_mie_out = mstatus_mie;
+    assign mie_mtie_out    = mie[7];  // MTIE bit
+    assign mie_msie_out    = mie[3];  // MSIE bit
+    assign mip_msip_out    = mip_msip; // MSIP bit
 
 endmodule

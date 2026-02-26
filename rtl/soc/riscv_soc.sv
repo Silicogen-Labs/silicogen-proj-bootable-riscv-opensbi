@@ -1,8 +1,9 @@
 // riscv_soc.sv
-// Top-level RISC-V SoC integrating CPU, RAM, UART, and bus
+// Top-level RISC-V SoC integrating CPU, RAM, UART, Timer, and bus
 // Memory map:
-//   RAM:  0x00000000 - 0x003FFFFF (4MB)
-//   UART: 0x10000000 - 0x100000FF (256 bytes)
+//   RAM:   0x00000000 - 0x003FFFFF (4MB)
+//   TIMER: 0x02000000 - 0x02FFFFFF (16MB, RISC-V standard CLINT region)
+//   UART:  0x10000000 - 0x100000FF (256 bytes)
 
 module riscv_soc #(
     parameter MEM_INIT_FILE = ""
@@ -49,6 +50,16 @@ module riscv_soc #(
     logic [31:0] uart_rdata;
     logic        uart_ready;
     
+    // Timer interface
+    logic        timer_req;
+    logic        timer_we;
+    logic [31:0] timer_addr;
+    logic [31:0] timer_wdata;
+    logic [3:0]  timer_wstrb;  // Not used by timer module
+    logic [31:0] timer_rdata;
+    logic        timer_ready;
+    logic        timer_irq;
+    
     // ========================
     // CPU Core Instantiation
     // ========================
@@ -56,6 +67,9 @@ module riscv_soc #(
     cpu_core u_cpu_core (
         .clk        (clk),
         .rst_n      (rst_n),
+        
+        // Interrupts
+        .timer_irq  (timer_irq),
         
         // Instruction bus
         .ibus_req   (ibus_req),
@@ -116,7 +130,16 @@ module riscv_soc #(
         .uart_wdata (uart_wdata),
         .uart_wstrb (uart_wstrb),
         .uart_rdata (uart_rdata),
-        .uart_ready (uart_ready)
+        .uart_ready (uart_ready),
+        
+        // Timer interface
+        .timer_req   (timer_req),
+        .timer_we    (timer_we),
+        .timer_addr  (timer_addr),
+        .timer_wdata (timer_wdata),
+        .timer_wstrb (timer_wstrb),
+        .timer_rdata (timer_rdata),
+        .timer_ready (timer_ready)
     );
     
     // ========================
@@ -154,6 +177,22 @@ module riscv_soc #(
         .rdata  (uart_rdata),
         .ready  (uart_ready),
         .uart_tx(uart_tx)
+    );
+    
+    // ========================
+    // Timer (RISC-V CLINT)
+    // ========================
+    
+    timer u_timer (
+        .clk      (clk),
+        .rst_n    (rst_n),
+        .req      (timer_req),
+        .we       (timer_we),
+        .addr     (timer_addr),
+        .wdata    (timer_wdata),
+        .rdata    (timer_rdata),
+        .ready    (timer_ready),
+        .timer_irq(timer_irq)
     );
 
 endmodule

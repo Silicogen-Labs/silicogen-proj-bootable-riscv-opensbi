@@ -40,27 +40,39 @@ module simple_bus (
     output logic [31:0] uart_wdata,
     output logic [3:0]  uart_wstrb,
     input  logic [31:0] uart_rdata,
-    input  logic        uart_ready
+    input  logic        uart_ready,
+    
+    // Timer interface (slave)
+    output logic        timer_req,
+    output logic        timer_we,
+    output logic [31:0] timer_addr,
+    output logic [31:0] timer_wdata,
+    output logic [3:0]  timer_wstrb,
+    input  logic [31:0] timer_rdata,
+    input  logic        timer_ready
 );
 
     // Memory map (from memory_map.md)
-    // RAM:  0x00000000 - 0x003FFFFF (4MB)
-    // UART: 0x10000000 - 0x100000FF (256 bytes)
+    // RAM:   0x00000000 - 0x003FFFFF (4MB)
+    // TIMER: 0x02000000 - 0x02FFFFFF (16MB, RISC-V standard CLINT region)
+    // UART:  0x10000000 - 0x100000FF (256 bytes)
     
     // Address decode
-    logic ibus_to_ram, ibus_to_uart, ibus_unmapped;
-    logic dbus_to_ram, dbus_to_uart, dbus_unmapped;
+    logic ibus_to_ram, ibus_to_uart, ibus_to_timer, ibus_unmapped;
+    logic dbus_to_ram, dbus_to_uart, dbus_to_timer, dbus_unmapped;
     
     always_comb begin
         // Instruction bus decode
         ibus_to_ram = (ibus_addr >= 32'h00000000) && (ibus_addr < 32'h00400000);
+        ibus_to_timer = (ibus_addr >= 32'h02000000) && (ibus_addr < 32'h03000000);
         ibus_to_uart = (ibus_addr >= 32'h10000000) && (ibus_addr < 32'h10000100);
-        ibus_unmapped = !(ibus_to_ram || ibus_to_uart);
+        ibus_unmapped = !(ibus_to_ram || ibus_to_timer || ibus_to_uart);
         
         // Data bus decode
         dbus_to_ram = (dbus_addr >= 32'h00000000) && (dbus_addr < 32'h00400000);
+        dbus_to_timer = (dbus_addr >= 32'h02000000) && (dbus_addr < 32'h03000000);
         dbus_to_uart = (dbus_addr >= 32'h10000000) && (dbus_addr < 32'h10000100);
-        dbus_unmapped = !(dbus_to_ram || dbus_to_uart);
+        dbus_unmapped = !(dbus_to_ram || dbus_to_timer || dbus_to_uart);
     end
     
     // Arbitration: instruction bus has lower priority than data bus
@@ -127,6 +139,29 @@ module simple_bus (
         end
     end
     
+    // Timer interface routing
+    always_comb begin
+        timer_req = 1'b0;
+        timer_we = 1'b0;
+        timer_addr = 32'h0;
+        timer_wdata = 32'h0;
+        timer_wstrb = 4'h0;
+        
+        if (dbus_grant && dbus_to_timer) begin
+            timer_req = dbus_req;
+            timer_we = dbus_we;
+            timer_addr = dbus_addr;
+            timer_wdata = dbus_wdata;
+            timer_wstrb = dbus_wstrb;
+        end else if (ibus_grant && ibus_to_timer) begin
+            timer_req = ibus_req;
+            timer_we = 1'b0;
+            timer_addr = ibus_addr;
+            timer_wdata = 32'h0;
+            timer_wstrb = 4'hF;
+        end
+    end
+    
     // Response routing for instruction bus
     always_comb begin
         ibus_rdata = 32'h0;
@@ -137,6 +172,10 @@ module simple_bus (
             if (ibus_to_ram) begin
                 ibus_rdata = ram_rdata;
                 ibus_ready = ram_ready;
+                ibus_error = 1'b0;
+            end else if (ibus_to_timer) begin
+                ibus_rdata = timer_rdata;
+                ibus_ready = timer_ready;
                 ibus_error = 1'b0;
             end else if (ibus_to_uart) begin
                 ibus_rdata = uart_rdata;
@@ -160,6 +199,10 @@ module simple_bus (
             if (dbus_to_ram) begin
                 dbus_rdata = ram_rdata;
                 dbus_ready = ram_ready;
+                dbus_error = 1'b0;
+            end else if (dbus_to_timer) begin
+                dbus_rdata = timer_rdata;
+                dbus_ready = timer_ready;
                 dbus_error = 1'b0;
             end else if (dbus_to_uart) begin
                 dbus_rdata = uart_rdata;

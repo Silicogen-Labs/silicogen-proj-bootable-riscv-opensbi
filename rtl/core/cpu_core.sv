@@ -8,6 +8,9 @@ module cpu_core (
     input  logic        clk,
     input  logic        rst_n,
     
+    // Interrupt inputs
+    input  logic        timer_irq,
+    
     // Instruction bus interface
     output logic        ibus_req,
     output logic [31:0] ibus_addr,
@@ -99,6 +102,8 @@ module cpu_core (
     logic        mret;
     logic        mret_latched;  // Latched version for WRITEBACK
     logic [31:0] mtvec_base, mepc_out;
+    logic        mstatus_mie, mie_mtie, mie_msie;  // Interrupt enable signals
+    logic        mip_msip;  // Software interrupt pending
     
     // Control signals
     logic [1:0] pc_source;
@@ -208,8 +213,13 @@ module cpu_core (
         .mret              (mret),
         .mtvec_base        (mtvec_base),
         .mepc_out          (mepc_out),
+        .mstatus_mie_out   (mstatus_mie),
+        .mie_mtie_out      (mie_mtie),
+        .mie_msie_out      (mie_msie),
+        .mip_msip_out      (mip_msip),
         .count_cycle       (1'b1),  // Always count cycles
-        .count_instret     (state == STATE_WRITEBACK)
+        .count_instret     (state == STATE_WRITEBACK),
+        .timer_irq         (timer_irq)
     );
     
     // =======================
@@ -250,7 +260,21 @@ module cpu_core (
             end
             
             STATE_FETCH: begin
-                next_state = STATE_FETCH_WAIT;
+                // Check for pending interrupts before fetching instruction
+                // Priority: External (MEI) > Software (MSI) > Timer (MTI)
+                // For M-mode only: check mstatus.MIE && mie.MxIE && pending
+                if (mstatus_mie) begin
+                    // Software interrupt has priority over timer
+                    if (mie_msie && mip_msip) begin
+                        next_state = STATE_TRAP;
+                    end else if (mie_mtie && timer_irq) begin
+                        next_state = STATE_TRAP;
+                    end else begin
+                        next_state = STATE_FETCH_WAIT;
+                    end
+                end else begin
+                    next_state = STATE_FETCH_WAIT;
+                end
             end
             
             STATE_FETCH_WAIT: begin
@@ -544,7 +568,25 @@ module cpu_core (
         trap_value = 32'h0;
         is_interrupt = 1'b0;
         
-        if (state == STATE_DECODE || state == STATE_EXECUTE) begin
+        // Check for pending interrupts in STATE_FETCH
+        // Priority: External (11) > Software (3) > Timer (7)
+        // mcause format: {interrupt_bit[31], reserved[30:4], exception_code[3:0]}
+        if (state == STATE_FETCH && mstatus_mie) begin
+            // Software interrupt has higher priority than timer
+            if (mie_msie && mip_msip) begin
+                trap_detected = 1'b1;
+                trap_cause = 4'h3;  // Machine software interrupt code
+                trap_value = 32'h0;
+                is_interrupt = 1'b1;  // Set interrupt bit for mcause
+            end else if (mie_mtie && timer_irq) begin
+                trap_detected = 1'b1;
+                trap_cause = 4'h7;  // Machine timer interrupt code
+                trap_value = 32'h0;
+                is_interrupt = 1'b1;  // Set interrupt bit for mcause
+            end
+        end
+        
+        if (state == STATE_DECODE || state == STATE_EXECUTE || state == STATE_MEMORY) begin
             // ALU Register operations (R-type)
             if (is_alu_reg) begin
                 reg_write_enable = 1'b1;
