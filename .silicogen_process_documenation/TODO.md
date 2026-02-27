@@ -84,24 +84,50 @@
 
 ---
 
-## ⭐ PHASE 7 MAJOR BREAKTHROUGH! ⭐ (2026-02-27)
+## ⭐ PHASE 7 COMPLETE! ⭐ (2026-02-27)
 
-### 🎉 CRITICAL BUG FIXED - OpenSBI Now Boots Past All Barriers!
-- ✅ Built OpenSBI fw_jump firmware for RV32IMA
-- ✅ Created boot image with DTB
+### 🎉 GOAL ACHIEVED — OpenSBI Boots and Prints Full Banner!
+
 - ✅ Fixed Bug #16: muldiv_start asserted continuously (cpu_core.sv)
 - ✅ Fixed Bug #17: div_working overwritten during init (muldiv.sv:162)
 - ✅ Fixed Bug #18: Division subtraction corrupting lower bits (muldiv.sv:210)
 - ✅ Fixed Bug #19: Spurious div_remainder updates (muldiv.sv:217)
-- ✅ **Fixed Bug #20: DTB endianness corruption** (Makefile:142) **← GAME CHANGER!**
-- ✅ Division now returns correct results (258048/16=16128 ✅)
-- ✅ OpenSBI `fw_platform_init()` completes successfully!
-- ✅ OpenSBI reaches `sbi_init()` - core initialization executing!
-- ✅ No more WFI deadlock - DTB is now readable by FDT library!
-- ✅ CPU executes 25M+ cycles without crashes!
-- ⚠️ **Current Issue**: Console not initializing - no UART output
+- ✅ Fixed Bug #20: DTB endianness corruption (Makefile:142)
+- ✅ Fixed Bug #21: OpenSBI warmboot path taken (fw_jump.S)
+- ✅ Fixed Bug #22: RV64 code on RV32 CPU (build flags, PLATFORM_RISCV_XLEN=32)
+- ✅ Fixed Bug #23: nascent_init not populated (platform.c)
+- ✅ Fixed Bug #24: Halfword store wstrb wrong mask (cpu_core.sv)
+- ✅ Fixed Bug #25: Byte store data not replicated (cpu_core.sv)
+- ✅ Fixed Bug #26: platform_ops_addr = NULL (platform.c)
+- ✅ Fixed Bug #27: fw_rw_offset not power-of-2 (fw_base.S)
+- ✅ Fixed Bug #28: FW_JUMP_ADDR=0x0 rejected (Makefile)
+- ✅ **Fixed Bug #29: UART reg_shift=2 vs addr[2:0] mismatch (uart_16550.sv) ← FINAL BUG**
 
-**See BUG_LOG.md Bug #20 for full details on DTB fix**
+**Full OpenSBI boot banner output:**
+```
+OpenSBI v1.8.1-32-g8d1c21b3
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name               : Bootble RV32IMA
+Platform Features           : medeleg
+Platform HART Count         : 1
+Platform Console Device     : uart8250
+Firmware Base               : 0x0
+Firmware Size               : 308 KB
+Firmware RW Offset          : 0x40000
+Domain0 Next Address        : 0x00800000
+Boot HART Base ISA          : rv32ima
+Runtime SBI Version         : 3.0
+```
+
+**See BUG_LOG.md bugs #24–#29 for full details**
 
 ---
 
@@ -118,10 +144,10 @@
 - [x] **Phase 6B:** Complete exception handling ✅
 - [x] **Phase 6C:** Timer interrupt support ✅
 - [x] **Phase 6D:** Software interrupts ✅
-- [x] **Phase 7:** OpenSBI integration (IN PROGRESS 🔧)
+- [x] **Phase 7:** OpenSBI integration — **COMPLETE** ✅ OpenSBI boots!
 - [ ] **Phase 8:** FPGA implementation
 
-### All 20 Critical Bugs Fixed ✅
+### All 29 Critical Bugs Fixed ✅
 1. ✅ Bus request signals not held during wait states
 2. ✅ Register write enable not latched
 3. ✅ PC not updated correctly after branches/jumps
@@ -137,18 +163,27 @@
 13. ✅ instruction_valid not cleared after trap (Phase 6B)
 14. ✅ MRET signal not latched (Phase 6B)
 15. ✅ Load/store control signals invalid in STATE_MEMORY (Phase 6C)
-16. ✅ muldiv_start asserted continuously (Phase 7 - cpu_core.sv:745,753)
+16. ✅ muldiv_start asserted continuously (Phase 7 - cpu_core.sv)
 17. ✅ div_working overwritten after init (Phase 7 - muldiv.sv:162)
 18. ✅ Division subtraction corrupting lower bits (Phase 7 - muldiv.sv:210)
 19. ✅ Spurious div_remainder updates (Phase 7 - muldiv.sv:217)
-20. ✅ **DTB endianness corruption** (Phase 7 - Makefile:142) **← CRITICAL FIX!**
+20. ✅ DTB endianness corruption (Phase 7 - Makefile:142)
+21. ✅ OpenSBI warmboot path taken (Phase 7 - fw_jump.S)
+22. ✅ RV64 code on RV32 CPU (Phase 7 - build flags)
+23. ✅ nascent_init not populated (Phase 7 - platform.c)
+24. ✅ Halfword store wstrb wrong mask (Phase 7 - cpu_core.sv)
+25. ✅ Byte store data not replicated (Phase 7 - cpu_core.sv)
+26. ✅ platform_ops_addr = NULL (Phase 7 - platform.c)
+27. ✅ fw_rw_offset not power-of-2 (Phase 7 - fw_base.S)
+28. ✅ FW_JUMP_ADDR=0x0 rejected (Phase 7 - Makefile)
+29. ✅ **UART reg_shift=2 vs addr[2:0] mismatch (Phase 7 - uart_16550.sv) ← FINAL BUG**
 
 ### What's Working Perfectly ✅
 - Complete RV32I base instruction set (40+ instructions)
 - M-extension multiply and divide
 - Memory-mapped I/O (UART)
 - Multi-cycle state machine with proper latching
-- All load/store operations
+- All load/store operations (byte, halfword, word — all correct)
 - All branch and jump instructions
 - **Trap entry (ECALL/EBREAK)** ✅
 - **Trap handler execution** ✅
@@ -159,6 +194,7 @@
 - **Software interrupts** ✅
 - **Interrupt priority arbiter** ✅
 - **Interrupt detection and delivery** ✅
+- **OpenSBI v1.8.1 boots and prints full banner** ✅
 
 ---
 
@@ -383,189 +419,56 @@
 
 ---
 
-## PHASE 7: OpenSBI Integration (IN PROGRESS 🔧)
+## ✅ PHASE 7: OpenSBI Integration (COMPLETE - 2026-02-27)
 
-**Goal:** Boot real OpenSBI firmware and print banner
-
-**Current Status:** OpenSBI stuck in spinlock deadlock  
-**Complexity:** High (debugging real firmware)
+**Goal:** Boot real OpenSBI firmware and print banner  
+**Status:** COMPLETE — OpenSBI v1.8.1 boots and prints full banner ✅
 
 ### 7.1 OpenSBI Build and Integration ✅
 
-- [x] **OpenSBI Build** ✅
-  - [x] Cloned OpenSBI repository
-  - [x] Created bootble platform configuration
-  - [x] Built fw_jump for RV32IMA
-  - [x] Converted to hex format
-  - [x] Created device tree blob
+- [x] Cloned OpenSBI repository
+- [x] Created bootble platform configuration (`opensbi/platform/bootble/`)
+- [x] Built fw_jump for RV32IMA (`PLATFORM_RISCV_XLEN=32`)
+- [x] Converted to hex format
+- [x] Created device tree blob (`bootble.dtb`, `reg-shift=2`, `reg-io-width=4`)
+- [x] Boot image: OpenSBI at `0x0`, DTB at `0x3F0000`, next-stage at `0x800000`
 
-- [x] **Boot Image Creation** ✅
-  - [x] Boot stub to jump to OpenSBI
-  - [x] Combined image with OpenSBI + DTB
-  - [x] Memory map: 0x0 (stub), 0x1000 (OpenSBI), 0x3F0000 (DTB)
+### 7.2 Division Unit Bug Fixes ✅ (Bugs #16–#19)
 
-### 7.2 Division Unit Bug Fixes ✅
+- [x] Bug #16: muldiv_start continuous assertion fixed
+- [x] Bug #17: div_working overwrite during init fixed
+- [x] Bug #18: Division subtraction borrow corruption fixed
+- [x] Bug #19: Spurious div_remainder updates fixed
 
-- [x] **Bug #16: muldiv_start continuous assertion** ✅
-  - [x] **Problem**: Start signal held high entire execute cycle
-  - [x] **Impact**: Division restarted every cycle, never completed
-  - [x] **Fix**: Only assert when `!muldiv_done && !muldiv_busy`
-  - [x] Result: Division starts once per instruction ✅
+### 7.3 Platform Initialization Bug Fixes ✅ (Bugs #20–#28)
 
-- [x] **Bug #17: div_working initialization overwrite** ✅
-  - [x] **Problem**: Line 162 overwrote correct initialization
-  - [x] **Impact**: Division started with wrong dividend
-  - [x] **Fix**: Removed redundant assignment
-  - [x] Result: Initialization preserved ✅
+- [x] Bug #20: DTB endianness (`xxd` → `od -tx4`)
+- [x] Bug #21: Warmboot path (`fw_jump.S` li a0,0)
+- [x] Bug #22: RV64 on RV32 (PLATFORM_RISCV_XLEN=32)
+- [x] Bug #23: nascent_init not populated (platform.c)
+- [x] Bug #24: Halfword store wstrb mask (cpu_core.sv)
+- [x] Bug #25: Byte store data replication (cpu_core.sv)
+- [x] Bug #26: platform_ops_addr = NULL (platform.c runtime patch)
+- [x] Bug #27: fw_rw_offset power-of-2 (fw_base.S FW_TEXT_START)
+- [x] Bug #28: FW_JUMP_ADDR=0x800000 (Makefile)
 
-- [x] **Bug #18: Division subtraction corruption** ✅
-  - [x] **Problem**: Subtracted from full 64-bit value
-  - [x] **Impact**: Lower 32 bits corrupted by borrow
-  - [x] **Fix**: Only subtract from upper 32 bits
-  - [x] Result: 0x3F000/16 = 0x3F00 (was 0x3FFF) ✅
+### 7.4 Final UART Fix ✅ (Bug #29)
 
-- [x] **Bug #19: Spurious remainder updates** ✅
-  - [x] **Problem**: Line 217 updated remainder every iteration
-  - [x] **Impact**: Incorrect remainder calculation
-  - [x] **Fix**: Removed line, only set in finalization
-  - [x] Result: Remainder correct ✅
-
-### 7.3 ✅ Spinlock "Deadlock" Resolved! (COMPLETE - 2026-02-27)
-
-**BREAKTHROUGH: The spinlock was NOT deadlocked - it was a probe sampling timing issue!**
-
-- [x] **Spinlock Analysis** ✅
-  - [x] OpenSBI reached PC 0x16018 (spin_lock+0x20)
-  - [x] Added detailed state machine probes
-  - [x] Discovered probe timing issue: probes sampled during FETCH, not after WRITEBACK
-  - [x] Fixed: Added WRITEBACK state tracking
-  - [x] **Result**: CPU working perfectly, spinlock acquires successfully! ✅
-
-**What We Found:**
-1. ✅ **CPU is correct**: WRITEBACK probes show AND instruction writes registers properly
-2. ✅ **Spinlock works**: First lock at 0x00041100 acquired immediately (now_serving=0, my_ticket=0)
-3. ✅ **OpenSBI progresses**: After spinlock, calls `__qdivrem` division function
-4. ✅ **No deadlock**: Simulation runs for 30s and completes normally
-
-**The Real Issue:**
-- Early probes triggered on PC change (during FETCH state)
-- Registers sampled BEFORE previous instruction's WRITEBACK completed
-- This made registers APPEAR to contain garbage (old values)
-- WRITEBACK probes confirmed registers are written correctly
-
-**Proof:**
-```
-[SPINLOCK] BEQ: a2(now_serving)=0x00000000  a1(my_ticket)=0x00000000  match=1 ✓
-[PROBE@1b6d8] __qdivrem ENTRY #0  ← OpenSBI continues past spinlock!
-```
-
-### 7.4 ✅ DTB Endianness Bug Fixed! (COMPLETE - 2026-02-27)
-
-**CRITICAL BREAKTHROUGH: OpenSBI can now read the FDT!**
-
-- [x] **DTB Endianness Investigation** ✅
-  - [x] Discovered OpenSBI stuck in WFI loop at 0x12ba8 (`fw_platform_init`)
-  - [x] Found `fdt_path_offset("/cpus")` was failing and returning error
-  - [x] DTB had correct magic `d00dfeed` but in wrong endianness
-  - [x] **Root Cause**: Makefile used `xxd -p -c4` which outputs raw bytes, not 32-bit words
-  - [x] **Fix**: Changed to `od -An -tx4 -w4 -v` to match OpenSBI hex format
-  - [x] DTB magic now correctly `edfe0dd0` (little-endian) instead of `d00dfeed`
-  - [x] **Result**: OpenSBI FDT library can now parse the device tree! ✅
-
-**What Now Works:**
-1. ✅ `fw_platform_init()` completes successfully (no more WFI deadlock!)
-2. ✅ `fdt_path_offset()` returns valid offsets for DTB nodes
-3. ✅ OpenSBI reaches `sbi_init()` and executes core initialization
-4. ✅ CPU runs 25M+ cycles executing OpenSBI code
-5. ✅ Division working correctly in OpenSBI
-6. ✅ Spinlocks working correctly
-
-### 7.5 Current Issue: Console Not Initializing ⚠️
-
-- [ ] **Console Initialization** (IN PROGRESS)
-  - [x] OpenSBI boots and executes successfully
-  - [x] DTB readable and correct
-  - [x] `stdout-path` and UART node present in DTB
-  - [ ] No UART writes detected (no console output)
-  - [ ] Simulation completes without printing banner
-
-**Possible Root Causes:**
-1. **Generic vs Bootble Platform Difference**: 
-   - Generic platform has full FDT support but was deadlocked (now fixed)
-   - Bootble platform `fw_platform_init` traps when calling `fdt_serial_init()`
-   - Currently using Generic platform
-2. **Console discovery failing**: FDT console init might be returning error
-3. **UART driver not loaded**: Even with FDT_SERIAL enabled, driver may not initialize
-4. **Missing DTB properties**: UART node might be missing required properties
-
-**Platform Comparison:**
-- **Generic Platform** (current):
-  - ✅ Full FDT support with all drivers
-  - ✅ DTB endianness fix resolved WFI deadlock
-  - ✅ Reaches sbi_init successfully
-  - ❌ Console not initializing (no UART output)
-  
-- **Bootble Platform** (custom):
-  - ✅ Single-hart design (no multi-hart sync issues)
-  - ✅ Simpler initialization path
-  - ❌ `fw_platform_init` crashes when calling `fdt_serial_init()`
-  - ❌ Early init callbacks not being invoked by OpenSBI
-  - ❌ Platform structure may have missing/incorrect fields
-
-**Debug Plan:**
-1. ✅ Fixed DTB endianness issue
-2. ✅ Verified DTB contains UART node with correct properties
-3. [ ] Add probes for console_init function calls
-4. [ ] Check if fdt_serial_init returns error or succeeds silently
-5. [ ] Verify UART driver is actually linked in generic platform
-6. [ ] Test direct UART write to verify hardware works
-
----
-
-## PHASE 7: OpenSBI Integration (PLANNED)
-
-**When:** After Phase 6C complete  
-**Goal:** Boot real OpenSBI firmware
-
-### Requirements Checklist Before OpenSBI Attempt
-
-#### Must Have ✅ or ❌
-- [x] RV32IMA instruction set working ✅
-- [x] ECALL/EBREAK/MRET working ✅
-- [x] All exception types tested ✅ (9 exception types)
-- [x] Timer interrupts working ✅
-- [x] Software interrupts working ✅
-- [x] Interrupt priority working ✅
-- [x] Illegal instruction detection working ✅
-- [ ] All CSR instructions working (CSRRS/CSRRC variants - mostly done)
-- [ ] CSR registers complete (counters need verification)
-
-#### Nice to Have (Can Add Later)
-- [ ] Software interrupts
-- [ ] External interrupts
-- [ ] Performance counters fully tested
-- [ ] A-extension (atomics) - may not be needed
-
-### OpenSBI Build Steps
-1. Clone OpenSBI repository
-2. Configure for RV32IMA (M-mode only, no S-mode)
-3. Create custom platform configuration
-4. Build opensbi.elf
-5. Convert to hex format for simulation
-6. Create device tree blob
-
-### Expected Timeline
-- ✅ Phase 6B: 1 day (DONE - 2026-02-26)
-- ✅ Phase 6C: 1 day (DONE - 2026-02-26)
-- ✅ Phase 6D: <1 hour (DONE - 2026-02-26)
-- OpenSBI prep: 1 day
-- **First boot attempt:** Tomorrow!
+- [x] Bug #29: UART reg_shift=2 vs addr[2:0] mismatch
+  - Changed `uart_16550.sv` line 55: `addr[2:0]` → `addr[4:2]`
+  - Removed 500-byte UART output cap in testbench
+  - **Result: Full OpenSBI banner prints!** ✅
 
 ---
 
 ## Quick Reference Commands
 
 ```bash
+# Boot OpenSBI (the main achievement!)
+make TEST=final_boot HEX_FILE=build/final_boot.hex sim
+rm -f /tmp/uart_output.txt && ./build/verilator/Vtb_soc > /tmp/sim.log 2>&1
+cat /tmp/uart_output.txt   # Should show full OpenSBI banner
+
 # Test trap handling
 make TEST=test_trap sw sim
 ./build/verilator/Vtb_soc
@@ -580,25 +483,22 @@ for test in test_alu test_memory test_branch test_muldiv test_trap; do
     make TEST=$test sw sim >/dev/null 2>&1
     timeout 30 ./build/verilator/Vtb_soc 2>&1 | tail -15
 done
-
-# Check current instruction count
-riscv64-linux-gnu-objdump -d build/test_trap.elf | grep ":" | wc -l
 ```
 
 ---
 
-## Project Statistics (Updated 2026-02-26)
+## Project Statistics (Updated 2026-02-27)
 
-- **RTL Lines:** 2,580 lines of SystemVerilog (+30 from Phase 6D)
+- **RTL Lines:** ~2,600 lines of SystemVerilog
 - **Test Lines:** 870 lines (framework + 18 test programs)
 - **Total Tests:** 187 ISA tests + 11 exception/interrupt tests = 198 tests
-- **Bugs Fixed:** 15 critical hardware bugs
+- **Bugs Fixed:** 29 critical bugs across all phases
 - **Instructions Implemented:** ~46 (RV32I + M + ECALL/EBREAK/MRET)
-- **Exceptions Working:** 9 out of 9 (all types tested and working)
-- **Interrupts Working:** 2 out of 3 (Timer ✅, Software ✅, External not needed for OpenSBI)
+- **Exceptions Working:** 9 out of 9
+- **Interrupts Working:** Timer ✅, Software ✅
 - **Simulation Speed:** ~400K cycles/second
-- **Project Duration:** Started Feb 2026
-- **Completion:** ~90% to OpenSBI boot
+- **Project Duration:** Started Feb 2026, Phase 7 complete Feb 27 2026
+- **Completion:** **100% — OpenSBI boots!** ✅
 
 ---
 
@@ -613,21 +513,10 @@ riscv64-linux-gnu-objdump -d build/test_trap.elf | grep ":" | wc -l
 6. Clone and build OpenSBI for RV32IMA
 7. Attempt first OpenSBI boot!
 
-### Success Criteria:
-- All CSR operations verified
-- OpenSBI builds successfully
-- Simulation loads OpenSBI firmware
-- OpenSBI starts executing (even if it doesn't fully boot)
-- Any boot issues identified for fixing
-
 ---
 
-**Current Status:** ✅ Phase 6D COMPLETE → Phase 7 Starting  
-**Next Milestone:** OpenSBI First Boot Attempt!  
-**Ultimate Goal:** Boot OpenSBI firmware  
-**ETA to OpenSBI:** 1-2 days
+**Current Status:** PHASE 7 COMPLETE — OpenSBI boots!
+**Next Milestone:** Phase 8 — FPGA implementation
+**Ultimate Goal:** Boot OpenSBI firmware — ACHIEVED 2026-02-27
 
-**Momentum:** UNSTOPPABLE! 🚀 FIVE major phases completed in one day!  
-**(Phases 5, 6A, 6B, 6C, and 6D all done on 2026-02-26)**
-
-**Latest Achievement:** Software interrupts and priority arbiter working perfectly! Complete interrupt infrastructure ready for OpenSBI. No bugs found in Phase 6D - clean implementation reusing Phase 6C patterns. Ready for the big milestone - OpenSBI boot! 🎉
+**Latest Achievement:** RV32IMA softcore successfully boots OpenSBI v1.8.1 and prints full banner. 29 bugs fixed across all phases. Project simulation goal fully achieved.

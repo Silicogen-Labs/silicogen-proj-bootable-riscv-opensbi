@@ -2,7 +2,7 @@
 
 **Project:** bootble-vm-riscv  
 **Last Updated:** 2026-02-27  
-**Total Bugs Fixed:** 22
+**Total Bugs Fixed:** 29
 
 ---
 
@@ -32,6 +32,13 @@
 | #20   | **CRITICAL** | 7     | ✅ Fixed | **DTB endianness corruption - OpenSBI FDT parsing failed** |
 | #21   | **CRITICAL** | 7     | ✅ Fixed | **OpenSBI warmboot path - console never initialized** |
 | #22   | **CRITICAL** | 7     | ✅ Fixed | **RV64 code on RV32 CPU - illegal instruction exceptions** |
+| #23   | **CRITICAL** | 7     | ✅ Fixed | **nascent_init not populated - console never initialized** |
+| #24   | Critical | 7     | ✅ Fixed | Halfword store wstrb wrong mask |
+| #25   | Critical | 7     | ✅ Fixed | Byte store data not replicated across byte lanes |
+| #26   | **CRITICAL** | 7     | ✅ Fixed | **platform_ops_addr = NULL - platform ops never called** |
+| #27   | **CRITICAL** | 7     | ✅ Fixed | **fw_rw_offset not power-of-2 - OpenSBI domain init rejected** |
+| #28   | **CRITICAL** | 7     | ✅ Fixed | **FW_JUMP_ADDR=0x0 rejected by OpenSBI domain init** |
+| #29   | **CRITICAL** | 7     | ✅ Fixed | **UART reg_shift=2 vs addr[2:0] hardware mismatch - LSR poll infinite loop** |
 
 ---
 
@@ -709,4 +716,157 @@
 4. **Check offsets:** Verify memory writes match structure layout
 
 **Lesson:** When implementing platform support, populate ALL mandatory callbacks. Don't assume which are optional!
+
+---
+
+### Bug #24: Halfword Store `wstrb` Wrong Mask
+- **Discovered:** Phase 7 (OpenSBI Integration) - 2026-02-27
+- **Severity:** Critical
+- **Symptom:** Half-word store instructions corrupted neighbouring bytes in memory
+- **Root Cause:** Write-strobe mask for `SH` (store halfword) was computed incorrectly; all 4 byte-enables were asserted instead of just the 2 relevant ones
+- **Fix:** Corrected `wstrb` generation in `rtl/core/cpu_core.sv` to produce `4'b0011` or `4'b1100` depending on `addr[1]`
+- **Files Modified:** `rtl/core/cpu_core.sv`
+- **Status:** ✅ Fixed
+
+### Bug #25: Byte Store Data Not Replicated Across Byte Lanes
+- **Discovered:** Phase 7 (OpenSBI Integration) - 2026-02-27
+- **Severity:** Critical
+- **Symptom:** `SB` (store byte) wrote wrong value; byte appeared only in lane 0 regardless of destination byte lane
+- **Root Cause:** Byte store `wdata` was not replicated — `{24'b0, rs2[7:0]}` was sent instead of `{4{rs2[7:0]}}`
+- **Fix:** Changed `wdata` for byte stores to replicate the byte across all four lanes: `{4{rs2[7:0]}}`
+- **Files Modified:** `rtl/core/cpu_core.sv`
+- **Status:** ✅ Fixed
+
+### Bug #26: `platform_ops_addr` = NULL — Platform Ops Never Called ⭐ CRITICAL
+- **Discovered:** Phase 7 (OpenSBI Integration) - 2026-02-27
+- **Severity:** **CRITICAL - Platform ops silently skipped**
+- **Symptom:**
+  - Platform callbacks (nascent_init, early_init, final_init) populated in `platform_ops` struct
+  - But OpenSBI never invoked them — it loaded NULL from `platform->platform_ops_addr`
+- **Root Cause:**
+  - `platform` is a `const struct sbi_platform` defined in `platform.c`
+  - The `platform_ops_addr` field was never set to point to `platform_ops`
+  - OpenSBI reads `platform->platform_ops_addr` at runtime to find the ops table
+  - With `platform_ops_addr = 0`, no callbacks were ever called
+- **Fix:** Added runtime patch in `fw_platform_init()`:
+  ```c
+  ((struct sbi_platform *)&platform)->platform_ops_addr = (unsigned long)&platform_ops;
+  ```
+- **Files Modified:** `opensbi/platform/bootble/platform.c`
+- **Status:** ✅ Fixed
+
+### Bug #27: `fw_rw_offset` Not Power-of-2 — OpenSBI Domain Init Rejected ⭐ CRITICAL
+- **Discovered:** Phase 7 (OpenSBI Integration) - 2026-02-27
+- **Severity:** **CRITICAL - Domain registration failed silently**
+- **Symptom:**
+  - OpenSBI domain init rejected firmware region
+  - `fw_rw_offset` was not a power of 2 — OpenSBI requires alignment
+- **Root Cause:**
+  - `fw_base.S` computed `fw_start` using `lla a4, _fw_start` (runtime symbol address)
+  - At link time `_fw_start` resolves to `0x0`, but the runtime value included load-address offset
+  - `fw_rw_offset = _fw_rw_start - fw_start` was not `0x40000` as expected
+- **Fix:** Changed `fw_base.S` to use the macro constant instead of the symbol:
+  ```asm
+  # OLD:
+  lla  a4, _fw_start          # fw_start = runtime address (wrong)
+  # NEW:
+  li   a4, FW_TEXT_START       # fw_start = 0x0 (correct)
+  ```
+  Also changed `fw_rw_offset` calculation:
+  ```asm
+  lla  a5, _fw_rw_start
+  li   a6, FW_TEXT_START
+  sub  a5, a5, a6             # fw_rw_offset = 0x40000 = 2^18 ✅
+  ```
+- **Files Modified:** `opensbi/firmware/fw_base.S`
+- **Status:** ✅ Fixed
+
+### Bug #28: `FW_JUMP_ADDR=0x0` Rejected by OpenSBI Domain Init ⭐ CRITICAL
+- **Discovered:** Phase 7 (OpenSBI Integration) - 2026-02-27
+- **Severity:** **CRITICAL - Next-stage jump address invalid**
+- **Symptom:**
+  - OpenSBI `sbi_domain_register` rejected `0x0` as next-stage address
+  - Domain init returned error; boot halted
+- **Root Cause:**
+  - `Makefile` had `FW_JUMP_ADDR=0x00000000` — the same address as OpenSBI itself
+  - OpenSBI validates the next-stage address is non-zero and within a valid domain region
+  - `0x0` is the firmware text base, not a valid next-stage payload address
+- **Fix:** Changed `Makefile` line 128:
+  ```makefile
+  # OLD:
+  FW_JUMP_ADDR=0x00000000
+  # NEW:
+  FW_JUMP_ADDR=0x00800000
+  ```
+- **Files Modified:** `Makefile`
+- **Lines:** 128
+- **Status:** ✅ Fixed
+
+### Bug #29: UART `reg_shift=2` vs `addr[2:0]` Hardware Mismatch — LSR Poll Infinite Loop ⭐ CRITICAL FINAL BUG
+- **Discovered:** Phase 7 (OpenSBI Integration) - 2026-02-27
+- **Severity:** **CRITICAL - No UART output, infinite loop**
+- **Symptom:**
+  - CPU stuck at PC `0x1ac60`–`0x1ac88` forever — the `uart8250_putc` LSR poll loop
+  - `/tmp/uart_output.txt` completely empty — no characters ever written
+  - Simulation ran for 500M cycles with zero UART output
+- **Root Cause:**
+  - `platform.c` calls `uart8250_init(0x10000000, 50000000, 115200, 2, 4, 0, 0)` — `reg_shift=2`
+  - OpenSBI's `uart8250_putc` computes LSR address as: `base + (LSR_index << reg_shift)` = `0x10000000 + (5 << 2)` = **`0x10000014`**
+  - Our UART hardware (`uart_16550.sv`) decoded: `assign reg_addr = addr[2:0]` — byte-offset addressing
+  - `0x10000014 & 0x7 = 4` → mapped to `ADDR_MCR` (register 4), **not** `ADDR_LSR` (register 5)
+  - `MCR` returns `0x00` → THRE bit (bit 5) = 0 → TX not ready → **infinite poll loop**
+- **The chain:**
+  ```
+  uart8250_putc computes LSR addr = 0x10000000 + (5<<2) = 0x10000014
+  UART hardware: reg_addr = 0x10000014[2:0] = 4  ← ADDR_MCR, not ADDR_LSR!
+  MCR reads as 0x00 → THRE=0 → loop forever
+  ```
+- **Fix:** Changed `rtl/peripherals/uart_16550.sv` line 55:
+  ```systemverilog
+  // OLD (byte-offset addressing — wrong for reg_shift=2):
+  assign reg_addr = addr[2:0];
+
+  // NEW (word-offset addressing — correct for reg_shift=2):
+  assign reg_addr = addr[4:2];
+  ```
+  With `addr[4:2]`: `0x10000014[4:2] = 5` → `ADDR_LSR` ✅ → THRE bit set → TX proceeds
+- **Files Modified:** `rtl/peripherals/uart_16550.sv`
+- **Lines:** 55
+- **Also Fixed:** Removed 500-byte cap on UART output in `sim/testbenches/tb_soc.sv` line 870 (`uart_write_count < 500` → `1`)
+- **Verification:**
+  ```
+  OpenSBI v1.8.1-32-g8d1c21b3
+     ____                    _____ ____ _____
+    / __ \                  / ____|  _ \_   _|
+  ...
+  Platform Name               : Bootble RV32IMA
+  Platform Console Device     : uart8250
+  Firmware Base               : 0x0
+  Boot HART Base ISA          : rv32ima
+  ```
+- **Status:** ✅ Fixed — **OpenSBI boots and prints full banner!**
+- **Impact:** **PROJECT GOAL ACHIEVED** — RV32IMA softcore successfully boots OpenSBI
+- **Lesson Learned:**
+  - `reg_shift` in UART drivers means registers are spaced `1 << reg_shift` bytes apart
+  - Hardware must use `addr[shift+2-1:shift]` (or equivalent) to decode register index
+  - Always verify that software `reg_shift` config matches hardware address decoding
+
+---
+
+## Updated Bug Patterns
+
+### Pattern #9: Interface Contract Mismatch (Bug #29) ⭐ FINAL PATTERN
+**Problem:** Software driver and hardware peripheral use different addressing conventions  
+**Solution:** Trace the full address computation from driver to hardware decode  
+**Example:**
+- `uart8250` driver uses `reg_shift=2` → registers at 4-byte intervals
+- UART hardware used `addr[2:0]` → expected registers at 1-byte intervals
+- Register 5 (LSR) mapped to wrong hardware register (MCR instead)
+
+**Detection Method:**
+1. Disassemble the driver to see actual address computed for each register
+2. Trace what hardware register that address maps to
+3. Check if the decoded register matches expectations
+
+**Lesson:** When configuring a peripheral driver, verify the hardware address decode matches the driver's `reg_shift`/`reg_io_width` settings exactly.
 

@@ -867,7 +867,7 @@ module tb_soc(
     always @(posedge clk) begin
         if (rst_n && dut.u_simple_bus.dbus_req && dut.u_simple_bus.dbus_we && 
             dut.u_simple_bus.dbus_addr == 32'h10000000 && dut.u_simple_bus.dbus_ready &&
-            uart_write_count < 500) begin
+            1) begin
             // Debug: log full transaction details INCLUDING PC
             $fwrite(uart_debug_file, "[%0d] PC=0x%h addr=0x%h wdata=0x%08x wstrb=0x%x byte0=0x%02x\n",
                     uart_write_count,
