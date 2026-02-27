@@ -106,7 +106,7 @@ DTB_HEX = $(BUILD_DIR)/bootble_dtb.hex
 FINAL_BOOT_HEX = $(BUILD_DIR)/final_boot.hex
 
 # DTB source
-DTB_SOURCE = bootble.dtb
+DTB_SOURCE = dts/bootble.dtb
 
 # Target to build complete boot image for OpenSBI
 .PHONY: boot-image
@@ -153,7 +153,7 @@ $(BOOT_STUB_HEX): $(TEST_DIR)/boot_opensbi.S | $(BUILD_DIR)
 # Create final boot image
 $(FINAL_BOOT_HEX): $(BOOT_STUB_HEX) $(OPENSBI_JUMP_HEX) $(DTB_HEX)
 	@echo "Creating final boot image..."
-	@bash create_final_boot_image.sh
+	@bash scripts/create_final_boot_image.sh
 	@echo "Final boot image created: $(FINAL_BOOT_HEX)"
 
 # Verilator simulation
@@ -296,6 +296,6 @@ help:
 	@echo "Build Components:"
 	@echo "  Boot stub:         sw/tests/boot_opensbi.S"
 	@echo "  OpenSBI firmware:  opensbi/build/platform/bootble/firmware/fw_jump.elf"
-	@echo "  Device tree:       bootble.dtb"
+	@echo "  Device tree:       dts/bootble.dtb"
 	@echo "  Final boot image:  build/final_boot.hex"
 	@echo ""
