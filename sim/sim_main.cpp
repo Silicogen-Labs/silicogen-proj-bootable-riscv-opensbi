@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
     
     uint64_t time = 0;
     uint64_t cycles = 0;
-    const uint64_t MAX_TIME = 500000000; // 500ms timeout (25M cycles at 50MHz)
+    const uint64_t MAX_TIME = 10000000000; // 10000ms timeout (500M cycles at 50MHz) - increased for OpenSBI boot
     bool test_complete = false;
     
     // Simulation loop - drive clock from C++

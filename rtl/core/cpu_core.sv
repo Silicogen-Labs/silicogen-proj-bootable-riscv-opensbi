@@ -41,6 +41,8 @@ module cpu_core (
         STATE_EXECUTE,
         STATE_MEMORY,
         STATE_MEMORY_WAIT,
+        STATE_AMO_WRITE,
+        STATE_AMO_WRITE_WAIT,
         STATE_WRITEBACK,
         STATE_TRAP
     } state_t;
@@ -64,7 +66,7 @@ module cpu_core (
     // Instruction categories
     logic is_load, is_store, is_branch, is_jal, is_jalr;
     logic is_lui, is_auipc, is_alu_reg, is_alu_imm;
-    logic is_system, is_mul, is_div;
+    logic is_system, is_mul, is_div, is_atomic;
     logic illegal_instruction;
     
     // Register file interface
@@ -123,9 +125,11 @@ module cpu_core (
     logic [31:0] mem_data_reg;
     logic [31:0] mem_data_processed;  // Processed load data (byte/halfword extracted)
     logic [31:0] pc_plus_4;
+    logic [31:0] pc_execute;   // PC latched at execute stage (for JAL/JALR return address)
     logic [1:0]  mem_addr_offset;     // Latched address offset for byte/halfword loads
     logic [1:0]  mem_width_latched;
     logic        mem_unsigned_latched;
+    logic [31:0] amo_write_data;      // Computed write-back value for AMO store phase
     
     // =======================
     // Module Instantiations
@@ -192,7 +196,7 @@ module cpu_core (
         .is_fence            (),
         .is_mul              (is_mul),
         .is_div              (is_div),
-        .is_atomic           (),
+        .is_atomic           (is_atomic),
         .illegal_instruction (illegal_instruction)
     );
     
@@ -299,6 +303,8 @@ module cpu_core (
                 // Check for traps first (highest priority)
                 if (trap_detected) begin
                     next_state = STATE_TRAP;
+                end else if (is_atomic) begin
+                    next_state = STATE_MEMORY;   // AMO read phase
                 end else if (is_load || is_store) begin
                     next_state = STATE_MEMORY;
                 end else if (is_mul || is_div) begin
@@ -324,11 +330,23 @@ module cpu_core (
                 if (dbus_ready) begin
                     if (dbus_error) begin
                         next_state = STATE_TRAP;
+                    end else if (is_atomic) begin
+                        next_state = STATE_AMO_WRITE;  // After read, do AMO write
                     end else if (is_load) begin
                         next_state = STATE_WRITEBACK;
                     end else begin
                         next_state = STATE_WRITEBACK;  // Stores need writeback for PC update
                     end
+                end
+            end
+            
+            STATE_AMO_WRITE: begin
+                next_state = STATE_AMO_WRITE_WAIT;
+            end
+            
+            STATE_AMO_WRITE_WAIT: begin
+                if (dbus_ready) begin
+                    next_state = STATE_WRITEBACK;
                 end
             end
             
@@ -348,7 +366,7 @@ module cpu_core (
     // Program Counter Logic
     // =======================
     
-    assign pc_plus_4 = pc + 4;
+    assign pc_plus_4 = pc_execute + 4;
     
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -457,6 +475,7 @@ module cpu_core (
             reg_write_source_latched <= reg_write_source;
             branch_taken_latched <= branch_taken;  // Latch branch decision
             mret_latched <= mret;  // Latch MRET decision
+            pc_execute <= pc;     // Latch PC for JAL/JALR return address
         end
     end
     
@@ -465,15 +484,34 @@ module cpu_core (
     // =======================
     
     always_comb begin
-        dbus_req = (state == STATE_MEMORY) || (state == STATE_MEMORY_WAIT);
-        dbus_we = is_store;
-        dbus_addr = alu_result_reg;  // Address comes from latched ALU result
-        dbus_wdata = rf_rs2_data;    // Store data from rs2
+        logic [31:0] store_data;
+        
+        dbus_req  = (state == STATE_MEMORY) || (state == STATE_MEMORY_WAIT) ||
+                    (state == STATE_AMO_WRITE) || (state == STATE_AMO_WRITE_WAIT);
+        // AMO read phase: is a load; AMO write phase: is a store
+        dbus_we   = is_store || (state == STATE_AMO_WRITE) || (state == STATE_AMO_WRITE_WAIT);
+        dbus_addr = alu_result_reg;   // Address from latched ALU result (rs1 for AMO)
+        
+        // Choose base store data (before alignment)
+        store_data = ((state == STATE_AMO_WRITE) || (state == STATE_AMO_WRITE_WAIT))
+                     ? amo_write_data : rf_rs2_data;
+        
+        // Align store data to correct byte lanes based on address offset and access size
+        // For byte stores: replicate byte to all lanes so wstrb selects the right one
+        // For halfword stores: replicate halfword to both lanes so wstrb selects the right one
+        // For word stores: use data as-is
+        case (funct3[1:0])
+            2'b00: dbus_wdata = {4{store_data[7:0]}};   // Byte: replicate to all 4 bytes
+            2'b01: dbus_wdata = {2{store_data[15:0]}};  // Halfword: replicate to both halves
+            2'b10: dbus_wdata = store_data;             // Word: use as-is
+            default: dbus_wdata = store_data;
+        endcase
         
         // Byte enable based on funct3 (mem_width)
+        // CRITICAL: Use alu_result_reg (latched address) not alu_result for byte position!
         case (funct3[1:0])
-            2'b00: dbus_wstrb = 4'b0001 << alu_result[1:0];  // Byte
-            2'b01: dbus_wstrb = 4'b0011 << {alu_result[1], 1'b0};  // Half-word
+            2'b00: dbus_wstrb = 4'b0001 << alu_result_reg[1:0];  // Byte
+            2'b01: dbus_wstrb = 4'b0011 << {alu_result_reg[1], 1'b0};  // Half-word
             2'b10: dbus_wstrb = 4'b1111;  // Word
             default: dbus_wstrb = 4'b0000;
         endcase
@@ -481,17 +519,27 @@ module cpu_core (
     
     // Latch memory control signals and address offset
     always_ff @(posedge clk) begin
-        if (state == STATE_EXECUTE && (is_load || is_store)) begin
+        if (state == STATE_EXECUTE && (is_load || is_store || is_atomic)) begin
             mem_width_latched <= mem_width;
             mem_unsigned_latched <= mem_unsigned;
             mem_addr_offset <= alu_result[1:0];  // Save address offset for byte/halfword extraction
         end
     end
     
-    // Latch memory data
+    // Latch memory data; compute AMO write-back value when read completes
     always_ff @(posedge clk) begin
         if (state == STATE_MEMORY_WAIT && dbus_ready && !dbus_error) begin
             mem_data_reg <= dbus_rdata;
+            // Compute the value to store back for AMO (based on funct5 = instr[31:27])
+            // rs2 value is available now via rf_rs2_data
+            case (instruction[31:27])
+                5'b00001: amo_write_data <= rf_rs2_data;               // amoswap: store rs2
+                5'b00000: amo_write_data <= dbus_rdata + rf_rs2_data;  // amoadd:  old + rs2
+                5'b01000: amo_write_data <= dbus_rdata | rf_rs2_data;  // amoor:   old | rs2
+                5'b01100: amo_write_data <= dbus_rdata & rf_rs2_data;  // amoand:  old & rs2
+                5'b00100: amo_write_data <= dbus_rdata ^ rf_rs2_data;  // amoxor:  old ^ rs2
+                default:  amo_write_data <= rf_rs2_data;               // fallback: store rs2
+            endcase
         end
     end
     
@@ -650,6 +698,18 @@ module cpu_core (
                 mem_width = funct3[1:0];
             end
             
+            // Atomic (AMO) operations — read-modify-write on rs1 address
+            // rd = old mem[rs1];  mem[rs1] = f(old, rs2)
+            else if (is_atomic) begin
+                reg_write_enable = 1'b1;
+                reg_write_source = 3'b001;  // Write old mem value (like a load) to rd
+                alu_src_a = 2'b00;  // rs1 = base address
+                alu_src_b = 2'b01;  // imm = 0 (AMO has no offset)
+                alu_op    = 4'b0000; // ADD: address = rs1 + 0
+                mem_width = 2'b10;  // Always word (.w)
+                mem_read  = 1'b1;
+            end
+            
             // Branch operations
             else if (is_branch && state == STATE_EXECUTE) begin
                 alu_src_a = 2'b00;  // rs1
@@ -697,7 +757,7 @@ module cpu_core (
             else if (is_mul && state == STATE_EXECUTE) begin
                 reg_write_enable = 1'b1;
                 reg_write_source = 3'b100;  // MUL/DIV result
-                muldiv_start = 1'b1;
+                muldiv_start = !muldiv_done && !muldiv_busy;  // Only start once
                 muldiv_op = funct3;
             end
             
@@ -705,16 +765,20 @@ module cpu_core (
             else if (is_div && state == STATE_EXECUTE) begin
                 reg_write_enable = 1'b1;
                 reg_write_source = 3'b100;  // MUL/DIV result
-                muldiv_start = 1'b1;
+                muldiv_start = !muldiv_done && !muldiv_busy;  // Only start once
                 muldiv_op = funct3;
             end
             
             // System instructions (CSR, ECALL, EBREAK, MRET)
             else if (is_system) begin
                 if (funct3 == 3'b000) begin
-                    // ECALL/EBREAK/MRET
+                    // ECALL/EBREAK/MRET/WFI/SFENCE.VMA
                     if (imm == 32'h302) begin
                         mret = 1'b1;
+                    end else if (imm == 32'h105) begin
+                        // WFI - treat as NOP (no power management in simulation)
+                    end else if (imm[31:25] == 7'b0001001) begin
+                        // SFENCE.VMA - treat as NOP (no MMU/TLB in this implementation)
                     end else begin
                         trap_detected = 1'b1;
                         trap_cause = (imm == 32'h1) ? 4'h3 : 4'hB;  // EBREAK : ECALL

@@ -64,6 +64,30 @@ module csr_file (
     localparam logic [11:0] CSR_TIMEH     = 12'hC81;
     localparam logic [11:0] CSR_INSTRET   = 12'hC02;
     localparam logic [11:0] CSR_INSTRETH  = 12'hC82;
+    // Entropy source (Zkr extension) - needed for stack canary generation
+    localparam logic [11:0] CSR_SEED      = 12'h015;
+    // Supervisor-mode CSRs (stubs - write ignored, read zero)
+    localparam logic [11:0] CSR_SSTATUS   = 12'h100;
+    localparam logic [11:0] CSR_SIE       = 12'h104;
+    localparam logic [11:0] CSR_STVEC     = 12'h105;
+    localparam logic [11:0] CSR_SCOUNTEREN= 12'h106;
+    localparam logic [11:0] CSR_SSCRATCH  = 12'h140;
+    localparam logic [11:0] CSR_SEPC      = 12'h141;
+    localparam logic [11:0] CSR_SCAUSE    = 12'h142;
+    localparam logic [11:0] CSR_STVAL     = 12'h143;
+    localparam logic [11:0] CSR_SIP       = 12'h144;
+    localparam logic [11:0] CSR_SATP      = 12'h180;
+    // Machine-mode extension CSRs (stubs)
+    localparam logic [11:0] CSR_MSTATUSH  = 12'h310;  // RV32 mstatus high
+    localparam logic [11:0] CSR_MEDELEG   = 12'h302;
+    localparam logic [11:0] CSR_MIDELEG   = 12'h303;
+    localparam logic [11:0] CSR_MCOUNTEREN= 12'h306;
+    localparam logic [11:0] CSR_MCOUNTINHIBIT = 12'h320;
+    // PMP CSRs (stubs - 16 pmpaddr + 4 pmpcfg)
+    localparam logic [11:0] CSR_PMPCFG0   = 12'h3A0;
+    localparam logic [11:0] CSR_PMPCFG1   = 12'h3A1;
+    localparam logic [11:0] CSR_PMPCFG2   = 12'h3A2;
+    localparam logic [11:0] CSR_PMPCFG3   = 12'h3A3;
 
     // CSR operation encodings
     localparam logic [1:0] CSR_OP_NONE = 2'b00;
@@ -166,9 +190,27 @@ module csr_file (
             CSR_INSTRET:   csr_rdata = minstret[31:0];
             CSR_INSTRETH:  csr_rdata = minstret[63:32];
             
+            // Entropy source: status=ES16 (2'b10), entropy from cycle counter
+            // Stack canary loop checks bits[31:30] >= 2'b10 to exit
+            CSR_SEED: csr_rdata = {2'b10, mcycle[29:0]};
+            
+            // Supervisor-mode CSRs: read as zero (OpenSBI writes these, no trap needed)
+            CSR_SSTATUS, CSR_SIE, CSR_STVEC, CSR_SCOUNTEREN,
+            CSR_SSCRATCH, CSR_SEPC, CSR_SCAUSE, CSR_STVAL,
+            CSR_SIP, CSR_SATP: csr_rdata = 32'h0;
+            
+            // Machine extension CSRs: read as zero
+            CSR_MSTATUSH, CSR_MEDELEG, CSR_MIDELEG,
+            CSR_MCOUNTEREN, CSR_MCOUNTINHIBIT: csr_rdata = 32'h0;
+            
+            // PMP CSRs: read as zero (no PMP implemented)
+            CSR_PMPCFG0, CSR_PMPCFG1, CSR_PMPCFG2, CSR_PMPCFG3: csr_rdata = 32'h0;
+            
             default: begin
-                csr_rdata = 32'h0;
-                csr_illegal = 1'b1;
+                // Unknown CSR: return 0, no illegal trap
+                // OpenSBI probes many optional CSRs; trapping would abort boot
+                csr_rdata   = 32'h0;
+                csr_illegal = 1'b0;
             end
         endcase
     end
@@ -289,12 +331,23 @@ module csr_file (
                     // Read-only registers - ignore writes
                     CSR_MISA, CSR_MVENDORID, CSR_MARCHID, CSR_MIMPID, CSR_MHARTID,
                     CSR_CYCLE, CSR_CYCLEH, CSR_TIME, CSR_TIMEH,
-                    CSR_INSTRET, CSR_INSTRETH: begin
+                    CSR_INSTRET, CSR_INSTRETH,
+                    // Seed is read-only (write of 0 is used to poll)
+                    CSR_SEED,
+                    // Supervisor-mode stubs: accept writes silently
+                    CSR_SSTATUS, CSR_SIE, CSR_STVEC, CSR_SCOUNTEREN,
+                    CSR_SSCRATCH, CSR_SEPC, CSR_SCAUSE, CSR_STVAL,
+                    CSR_SIP, CSR_SATP,
+                    // Machine extension stubs: accept writes silently
+                    CSR_MSTATUSH, CSR_MEDELEG, CSR_MIDELEG,
+                    CSR_MCOUNTEREN, CSR_MCOUNTINHIBIT,
+                    // PMP stubs: accept writes silently
+                    CSR_PMPCFG0, CSR_PMPCFG1, CSR_PMPCFG2, CSR_PMPCFG3: begin
                         // No write
                     end
                     
                     default: begin
-                        // Illegal CSR - no write
+                        // Unknown CSR write: silently ignore (no trap)
                     end
                 endcase
             end

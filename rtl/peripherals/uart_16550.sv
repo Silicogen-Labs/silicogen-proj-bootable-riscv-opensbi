@@ -52,7 +52,7 @@ module uart_16550 (
     logic [15:0] baud_counter;
     logic [15:0] baud_divisor;
     
-    assign reg_addr = addr[2:0];  // Byte addressing: register N at byte offset N
+    assign reg_addr = addr[4:2];  // Word addressing: register N at word offset N (reg_shift=2)
     assign dlab = lcr[7];
     assign baud_divisor = {dlm, dll};
     

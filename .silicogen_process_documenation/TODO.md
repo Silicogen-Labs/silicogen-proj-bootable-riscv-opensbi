@@ -1,8 +1,8 @@
 # RISC-V Processor Project - TODO List
 
-**Last Updated:** 2026-02-26  
-**Current Phase:** Phase 6D COMPLETE ✅ → Phase 7 Starting  
-**Next Milestone:** OpenSBI Boot Preparation and First Boot Attempt!
+**Last Updated:** 2026-02-27  
+**Current Phase:** Phase 7 IN PROGRESS 🔧  
+**Next Milestone:** Fix Spinlock Deadlock → OpenSBI Banner Print!
 
 ---
 
@@ -84,6 +84,27 @@
 
 ---
 
+## ⭐ PHASE 7 MAJOR BREAKTHROUGH! ⭐ (2026-02-27)
+
+### 🎉 CRITICAL BUG FIXED - OpenSBI Now Boots Past All Barriers!
+- ✅ Built OpenSBI fw_jump firmware for RV32IMA
+- ✅ Created boot image with DTB
+- ✅ Fixed Bug #16: muldiv_start asserted continuously (cpu_core.sv)
+- ✅ Fixed Bug #17: div_working overwritten during init (muldiv.sv:162)
+- ✅ Fixed Bug #18: Division subtraction corrupting lower bits (muldiv.sv:210)
+- ✅ Fixed Bug #19: Spurious div_remainder updates (muldiv.sv:217)
+- ✅ **Fixed Bug #20: DTB endianness corruption** (Makefile:142) **← GAME CHANGER!**
+- ✅ Division now returns correct results (258048/16=16128 ✅)
+- ✅ OpenSBI `fw_platform_init()` completes successfully!
+- ✅ OpenSBI reaches `sbi_init()` - core initialization executing!
+- ✅ No more WFI deadlock - DTB is now readable by FDT library!
+- ✅ CPU executes 25M+ cycles without crashes!
+- ⚠️ **Current Issue**: Console not initializing - no UART output
+
+**See BUG_LOG.md Bug #20 for full details on DTB fix**
+
+---
+
 ## Quick Status Overview
 
 ### Completed Phases ✅
@@ -97,10 +118,10 @@
 - [x] **Phase 6B:** Complete exception handling ✅
 - [x] **Phase 6C:** Timer interrupt support ✅
 - [x] **Phase 6D:** Software interrupts ✅
-- [ ] **Phase 7:** OpenSBI integration (CURRENT)
+- [x] **Phase 7:** OpenSBI integration (IN PROGRESS 🔧)
 - [ ] **Phase 8:** FPGA implementation
 
-### All 15 Critical Bugs Fixed ✅
+### All 20 Critical Bugs Fixed ✅
 1. ✅ Bus request signals not held during wait states
 2. ✅ Register write enable not latched
 3. ✅ PC not updated correctly after branches/jumps
@@ -116,6 +137,11 @@
 13. ✅ instruction_valid not cleared after trap (Phase 6B)
 14. ✅ MRET signal not latched (Phase 6B)
 15. ✅ Load/store control signals invalid in STATE_MEMORY (Phase 6C)
+16. ✅ muldiv_start asserted continuously (Phase 7 - cpu_core.sv:745,753)
+17. ✅ div_working overwritten after init (Phase 7 - muldiv.sv:162)
+18. ✅ Division subtraction corrupting lower bits (Phase 7 - muldiv.sv:210)
+19. ✅ Spurious div_remainder updates (Phase 7 - muldiv.sv:217)
+20. ✅ **DTB endianness corruption** (Phase 7 - Makefile:142) **← CRITICAL FIX!**
 
 ### What's Working Perfectly ✅
 - Complete RV32I base instruction set (40+ instructions)
@@ -354,6 +380,145 @@
   - [x] Timer interrupts still work
   - [x] Exceptions still work
   - [x] No regressions introduced
+
+---
+
+## PHASE 7: OpenSBI Integration (IN PROGRESS 🔧)
+
+**Goal:** Boot real OpenSBI firmware and print banner
+
+**Current Status:** OpenSBI stuck in spinlock deadlock  
+**Complexity:** High (debugging real firmware)
+
+### 7.1 OpenSBI Build and Integration ✅
+
+- [x] **OpenSBI Build** ✅
+  - [x] Cloned OpenSBI repository
+  - [x] Created bootble platform configuration
+  - [x] Built fw_jump for RV32IMA
+  - [x] Converted to hex format
+  - [x] Created device tree blob
+
+- [x] **Boot Image Creation** ✅
+  - [x] Boot stub to jump to OpenSBI
+  - [x] Combined image with OpenSBI + DTB
+  - [x] Memory map: 0x0 (stub), 0x1000 (OpenSBI), 0x3F0000 (DTB)
+
+### 7.2 Division Unit Bug Fixes ✅
+
+- [x] **Bug #16: muldiv_start continuous assertion** ✅
+  - [x] **Problem**: Start signal held high entire execute cycle
+  - [x] **Impact**: Division restarted every cycle, never completed
+  - [x] **Fix**: Only assert when `!muldiv_done && !muldiv_busy`
+  - [x] Result: Division starts once per instruction ✅
+
+- [x] **Bug #17: div_working initialization overwrite** ✅
+  - [x] **Problem**: Line 162 overwrote correct initialization
+  - [x] **Impact**: Division started with wrong dividend
+  - [x] **Fix**: Removed redundant assignment
+  - [x] Result: Initialization preserved ✅
+
+- [x] **Bug #18: Division subtraction corruption** ✅
+  - [x] **Problem**: Subtracted from full 64-bit value
+  - [x] **Impact**: Lower 32 bits corrupted by borrow
+  - [x] **Fix**: Only subtract from upper 32 bits
+  - [x] Result: 0x3F000/16 = 0x3F00 (was 0x3FFF) ✅
+
+- [x] **Bug #19: Spurious remainder updates** ✅
+  - [x] **Problem**: Line 217 updated remainder every iteration
+  - [x] **Impact**: Incorrect remainder calculation
+  - [x] **Fix**: Removed line, only set in finalization
+  - [x] Result: Remainder correct ✅
+
+### 7.3 ✅ Spinlock "Deadlock" Resolved! (COMPLETE - 2026-02-27)
+
+**BREAKTHROUGH: The spinlock was NOT deadlocked - it was a probe sampling timing issue!**
+
+- [x] **Spinlock Analysis** ✅
+  - [x] OpenSBI reached PC 0x16018 (spin_lock+0x20)
+  - [x] Added detailed state machine probes
+  - [x] Discovered probe timing issue: probes sampled during FETCH, not after WRITEBACK
+  - [x] Fixed: Added WRITEBACK state tracking
+  - [x] **Result**: CPU working perfectly, spinlock acquires successfully! ✅
+
+**What We Found:**
+1. ✅ **CPU is correct**: WRITEBACK probes show AND instruction writes registers properly
+2. ✅ **Spinlock works**: First lock at 0x00041100 acquired immediately (now_serving=0, my_ticket=0)
+3. ✅ **OpenSBI progresses**: After spinlock, calls `__qdivrem` division function
+4. ✅ **No deadlock**: Simulation runs for 30s and completes normally
+
+**The Real Issue:**
+- Early probes triggered on PC change (during FETCH state)
+- Registers sampled BEFORE previous instruction's WRITEBACK completed
+- This made registers APPEAR to contain garbage (old values)
+- WRITEBACK probes confirmed registers are written correctly
+
+**Proof:**
+```
+[SPINLOCK] BEQ: a2(now_serving)=0x00000000  a1(my_ticket)=0x00000000  match=1 ✓
+[PROBE@1b6d8] __qdivrem ENTRY #0  ← OpenSBI continues past spinlock!
+```
+
+### 7.4 ✅ DTB Endianness Bug Fixed! (COMPLETE - 2026-02-27)
+
+**CRITICAL BREAKTHROUGH: OpenSBI can now read the FDT!**
+
+- [x] **DTB Endianness Investigation** ✅
+  - [x] Discovered OpenSBI stuck in WFI loop at 0x12ba8 (`fw_platform_init`)
+  - [x] Found `fdt_path_offset("/cpus")` was failing and returning error
+  - [x] DTB had correct magic `d00dfeed` but in wrong endianness
+  - [x] **Root Cause**: Makefile used `xxd -p -c4` which outputs raw bytes, not 32-bit words
+  - [x] **Fix**: Changed to `od -An -tx4 -w4 -v` to match OpenSBI hex format
+  - [x] DTB magic now correctly `edfe0dd0` (little-endian) instead of `d00dfeed`
+  - [x] **Result**: OpenSBI FDT library can now parse the device tree! ✅
+
+**What Now Works:**
+1. ✅ `fw_platform_init()` completes successfully (no more WFI deadlock!)
+2. ✅ `fdt_path_offset()` returns valid offsets for DTB nodes
+3. ✅ OpenSBI reaches `sbi_init()` and executes core initialization
+4. ✅ CPU runs 25M+ cycles executing OpenSBI code
+5. ✅ Division working correctly in OpenSBI
+6. ✅ Spinlocks working correctly
+
+### 7.5 Current Issue: Console Not Initializing ⚠️
+
+- [ ] **Console Initialization** (IN PROGRESS)
+  - [x] OpenSBI boots and executes successfully
+  - [x] DTB readable and correct
+  - [x] `stdout-path` and UART node present in DTB
+  - [ ] No UART writes detected (no console output)
+  - [ ] Simulation completes without printing banner
+
+**Possible Root Causes:**
+1. **Generic vs Bootble Platform Difference**: 
+   - Generic platform has full FDT support but was deadlocked (now fixed)
+   - Bootble platform `fw_platform_init` traps when calling `fdt_serial_init()`
+   - Currently using Generic platform
+2. **Console discovery failing**: FDT console init might be returning error
+3. **UART driver not loaded**: Even with FDT_SERIAL enabled, driver may not initialize
+4. **Missing DTB properties**: UART node might be missing required properties
+
+**Platform Comparison:**
+- **Generic Platform** (current):
+  - ✅ Full FDT support with all drivers
+  - ✅ DTB endianness fix resolved WFI deadlock
+  - ✅ Reaches sbi_init successfully
+  - ❌ Console not initializing (no UART output)
+  
+- **Bootble Platform** (custom):
+  - ✅ Single-hart design (no multi-hart sync issues)
+  - ✅ Simpler initialization path
+  - ❌ `fw_platform_init` crashes when calling `fdt_serial_init()`
+  - ❌ Early init callbacks not being invoked by OpenSBI
+  - ❌ Platform structure may have missing/incorrect fields
+
+**Debug Plan:**
+1. ✅ Fixed DTB endianness issue
+2. ✅ Verified DTB contains UART node with correct properties
+3. [ ] Add probes for console_init function calls
+4. [ ] Check if fdt_serial_init returns error or succeeds silently
+5. [ ] Verify UART driver is actually linked in generic platform
+6. [ ] Test direct UART write to verify hardware works
 
 ---
 

@@ -142,6 +142,7 @@ module muldiv (
                                     div_b_neg <= operand_b[31];
                                     div_a <= operand_a[31] ? (~operand_a + 1) : operand_a;
                                     div_b <= operand_b[31] ? (~operand_b + 1) : operand_b;
+                                    div_working <= {32'h0, operand_a[31] ? (~operand_a + 1) : operand_a};
                                 end
                                 OP_DIVU, OP_REMU: begin
                                     // Unsigned division
@@ -149,15 +150,17 @@ module muldiv (
                                     div_b_neg <= 1'b0;
                                     div_a <= operand_a;
                                     div_b <= operand_b;
+                                    div_working <= {32'h0, operand_a};
                                 end
                                 default: begin
                                     div_a <= 32'h0;
                                     div_b <= 32'h1;
                                     div_a_neg <= 1'b0;
                                     div_b_neg <= 1'b0;
+                                    div_working <= 64'h0;
                                 end
                             endcase
-                            div_working <= {32'h0, div_a};
+                            // div_working is already set in the case above - don't overwrite!
                             div_quotient <= 32'h0;
                             div_remainder <= 32'h0;
                         end
@@ -197,21 +200,25 @@ module muldiv (
                             div_quotient <= 32'hFFFFFFFF;
                             div_remainder <= div_a;
                         end else begin
-                            // Shift and subtract
-                            logic [63:0] temp;
-                            temp = {div_working[62:0], 1'b0};
+                            // Shift left by 1
+                            logic [63:0] shifted;
+                            shifted = {div_working[62:0], 1'b0};
                             
-                            if (temp[63:32] >= div_b) begin
-                                temp = temp - {32'h0, div_b};
+                            // Check if we can subtract divisor
+                            if (shifted[63:32] >= div_b) begin
+                                // Yes, subtract divisor from upper bits and set quotient bit
+                                div_working <= {shifted[63:32] - div_b, shifted[31:0]};
                                 div_quotient <= {div_quotient[30:0], 1'b1};
                             end else begin
+                                // No, just shift and clear quotient bit
+                                div_working <= shifted;
                                 div_quotient <= {div_quotient[30:0], 1'b0};
                             end
-                            
-                            div_working <= temp;
-                            div_remainder <= temp[63:32];
                         end
                     end else begin
+                        // Finalize: just adjust signs for signed operations, quotient is already correct
+                        div_remainder <= div_working[63:32];
+                        
                         // Adjust signs for signed operations
                         if (operation == OP_DIV) begin
                             if (div_a_neg ^ div_b_neg) begin
