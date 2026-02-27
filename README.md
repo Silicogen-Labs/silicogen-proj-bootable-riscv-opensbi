@@ -44,18 +44,46 @@ dtc --version
 ## Quick Start — Boot OpenSBI
 
 ```bash
-# 1. Build the simulator and boot image
-make TEST=final_boot HEX_FILE=build/final_boot.hex sim
+# 1. Build the Verilator simulator (boot image already included as build/final_boot.hex)
+make sim-boot
 
-# 2. Run the simulation
-rm -f /tmp/uart_output.txt
-./build/verilator/Vtb_soc > /tmp/sim.log 2>&1
-
-# 3. See the OpenSBI banner
-cat /tmp/uart_output.txt
+# 2. Run — UART output prints directly to your terminal
+./build/verilator/Vtb_soc
 ```
 
-That's it. You should see the full OpenSBI banner above.
+You should see the full OpenSBI banner printed to your terminal:
+
+```
+OpenSBI v1.8.1-32-g8d1c21b3
+   ____                    _____ ____ _____
+  / __ \                  / ____|  _ \_   _|
+ | |  | |_ __   ___ _ __ | (___ | |_) || |
+ | |  | | '_ \ / _ \ '_ \ \___ \|  _ < | |
+ | |__| | |_) |  __/ | | |____) | |_) || |_
+  \____/| .__/ \___|_| |_|_____/|____/_____|
+        | |
+        |_|
+
+Platform Name               : Bootble RV32IMA
+Platform Features           : medeleg
+Platform HART Count         : 1
+Platform Console Device     : uart8250
+Firmware Base               : 0x0
+Firmware Size               : 308 KB
+Firmware RW Offset          : 0x40000
+Domain0 Next Address        : 0x00800000
+Boot HART Base ISA          : rv32ima
+Runtime SBI Version         : 3.0
+```
+
+To verify all expected lines are present:
+
+```bash
+./build/verilator/Vtb_soc | grep -E \
+  "OpenSBI|Platform Name|Platform HART Count|Platform Console|Firmware Base|Firmware RW Offset|Domain0 Next|Boot HART|Runtime SBI"
+```
+
+All 9 lines should appear. If any are missing, something is wrong with the boot.
 
 ## How It Works
 
@@ -78,8 +106,8 @@ When it tries to jump to `0x800000` it traps (no payload) and loops in M-mode.
 
 ### Rebuild everything
 ```bash
-make clean
-make TEST=final_boot HEX_FILE=build/final_boot.hex sim
+make rebuild
+./build/verilator/Vtb_soc
 ```
 
 ### Rebuild OpenSBI only
@@ -99,7 +127,7 @@ cd opensbi && make PLATFORM=bootble \
 
 ### Rebuild Verilator simulator only
 ```bash
-make TEST=final_boot HEX_FILE=build/final_boot.hex sim
+make sim-boot
 ```
 
 ## Running Unit Tests
@@ -168,14 +196,9 @@ Key signals:
 - `tb_soc.dut.u_cpu_core.instruction` — current instruction word
 - `tb_soc.dut.u_cpu_core.trap_taken` — exception/interrupt events
 
-### UART debug log
+### Simulation log (cycle probes and platform init milestones)
 ```bash
-cat /tmp/uart_debug.txt   # every UART write with PC and data
-```
-
-### Simulation log
-```bash
-cat /tmp/sim.log   # cycle probes, platform init milestones
+./build/verilator/Vtb_soc 2>&1 | grep PROBE
 ```
 
 ## Project Statistics
