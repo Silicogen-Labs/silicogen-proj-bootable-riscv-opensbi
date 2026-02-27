@@ -162,6 +162,8 @@ dbus ◄──────────────│─────────
   - `SRA`: operand_a >>> operand_b[4:0] (arithmetic right shift)
   - `SLT`: (signed)operand_a < (signed)operand_b ? 1 : 0
   - `SLTU`: (unsigned)operand_a < (unsigned)operand_b ? 1 : 0
+  - `PASS_A`: operand_a (used for LUI/AUIPC)
+  - `PASS_B`: operand_b
 - **Inputs**:
   - `operand_a` (32-bit): typically rs1_data
   - `operand_b` (32-bit): rs2_data or immediate
@@ -190,6 +192,7 @@ dbus ◄──────────────│─────────
 - **Outputs**:
   - `muldiv_result` (32-bit)
   - `done`: Operation complete
+  - `busy`: Operation in progress (used to stall the core)
 
 ### 8. CSR File (Zicsr Extension)
 - **Function**: Control and Status Registers
@@ -316,10 +319,10 @@ dbus ◄──────────────│─────────
 
 ## Atomic Operations (A-Extension)
 
-For atomic operations (LR.W, SC.W, AMO*), the datapath includes:
-- **Reservation Register**: Stores address for LR/SC
-- **Atomic Bus Protocol**: Special dbus signals for atomic transactions
-- **AMO ALU**: Performs atomic read-modify-write operations
+For atomic operations (LR.W, SC.W, AMO*), the implementation uses:
+- **Standard dbus interface**: No special atomic bus signals; atomics are implemented as two-phase transactions (read via MEMORY/MEMORY_WAIT, then write via AMO_WRITE/AMO_WRITE_WAIT)
+- **AMO write-back register**: Stores the computed write value (rs2 or ALU result of old value + rs2, etc.) during EXECUTE for later use in AMO_WRITE
+- **No hardware reservation register**: LR/SC semantics are handled by the bus/memory controller if needed (not currently implemented in this simple single-core design)
 
 ## Critical Timing Paths
 

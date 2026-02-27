@@ -53,19 +53,19 @@ RTL (Register Transfer Level) code describes *what* hardware exists: "there's a 
 
 ### Our CPU State Machine
 
-We designed a simple, non-pipelined processor with 10 states:
+We designed a simple, non-pipelined processor with 11 states:
 
 ```
 STATE_RESET → STATE_FETCH → STATE_FETCH_WAIT → STATE_DECODE → 
 STATE_EXECUTE → STATE_MEMORY → STATE_MEMORY_WAIT → STATE_WRITEBACK → 
 (back to STATE_FETCH)
 
-AMO path: STATE_EXECUTE → STATE_AMO_WRITE → STATE_AMO_WRITE_WAIT → STATE_WRITEBACK
+AMO path: STATE_EXECUTE → STATE_MEMORY → STATE_MEMORY_WAIT → STATE_AMO_WRITE → STATE_AMO_WRITE_WAIT → STATE_WRITEBACK
 ```
 
 **Why not pipelined?** Pipelining (where multiple instructions overlap in execution) is faster but *vastly* more complex. Hazards, forwarding, branch prediction—we'd spend months on that alone. For a first pass at booting firmware, a simple multi-cycle design is the pragmatic choice.
 
-**Why AMO_WRITE / AMO_WRITE_WAIT?** Atomic memory operations (AMO*) are a two-beat transaction: first a read (via the normal MEMORY/MEMORY_WAIT path), then a write of the modified value. Two dedicated states keep the write phase clean and allow the bus to signal errors independently.
+**Why AMO_WRITE / AMO_WRITE_WAIT?** Atomic memory operations (AMO*) are a two-beat transaction: first a read (via the normal MEMORY/MEMORY_WAIT path), then a write of the modified value. The AMO read phase uses the same MEMORY/MEMORY_WAIT states as a regular load. Only after the read completes does the FSM branch into AMO_WRITE/AMO_WRITE_WAIT for the write phase. Two dedicated states keep the write phase clean and allow the bus to signal errors independently.
 
 ### The Datapath
 
@@ -111,7 +111,7 @@ These documents became our contract. When debugging later, we could ask: "Does t
 
 ## Phase 2: RTL Implementation {#phase-2-rtl-implementation}
 
-With our blueprint complete, we translated the design into synthesizable SystemVerilog. This phase took several weeks and resulted in **2,246 lines of hardware description code** across 11 modules.
+With our blueprint complete, we translated the design into synthesizable SystemVerilog. This phase took several weeks and resulted in **~2,600 lines of hardware description code** across 11 modules.
 
 ### Module 1: Register File (`rtl/core/register_file.sv`)
 
@@ -157,6 +157,8 @@ case (alu_op)
     ALU_OP_SRA:  result = $signed(a) >>> b[4:0];
     ALU_OP_OR:   result = a | b;
     ALU_OP_AND:  result = a & b;
+    ALU_PASS_A:  result = a;  // Used for LUI/AUIPC
+    ALU_PASS_B:  result = b;
 endcase
 ```
 
@@ -207,7 +209,7 @@ Control and Status Registers are what make a processor capable of running an ope
 - Trap handling (what happens on exceptions and interrupts)
 - Timers and counters
 
-For OpenSBI, we need at least 12 CSRs:
+For OpenSBI, we need at least 12 core machine-mode CSRs:
 
 ```systemverilog
 // Machine-mode CSRs
@@ -226,7 +228,7 @@ The CSR file also implements the `CSRRW`, `CSRRS`, `CSRRC` instructions that rea
 
 ### Module 6: CPU Core (`rtl/core/cpu_core.sv`)
 
-This is the heart of the processor: 637 lines that tie everything together. The core instantiates all submodules and implements the state machine:
+This is the heart of the processor: 878 lines that tie everything together. The core instantiates all submodules and implements the state machine:
 
 ```systemverilog
 always_ff @(posedge clk or negedge rst_n) begin
@@ -335,7 +337,7 @@ uart_16550 u_uart (...);
 endmodule
 ```
 
-**At this point:** We had 2,246 lines of RTL that *compiled*. But did it *work*? Not even close.
+**At this point:** We had ~2,600 lines of RTL that *compiled*. But did it *work*? Not even close.
 
 ---
 
@@ -648,7 +650,7 @@ After completing all seven phases in an intense two-day sprint, the project achi
 ✅ **Full Exception Handling** - All 9 exception types implemented and tested  
 ✅ **Full Interrupt System** - Timer and software interrupts with priority handling  
 ✅ **Complete Trap Infrastructure** - `ECALL`, `EBREAK`, `MRET` working perfectly  
-✅ **22 Required CSRs** - All registers needed for M-mode firmware are present  
+✅ **40+ CSRs Implemented** - All M-mode registers plus S-mode read-zero/write-ignore stubs  
 ✅ **Memory-Mapped Peripherals** - UART and Timer fully integrated  
 ✅ **100% Test Pass Rate** - 200 tests passing (187 ISA + 13 custom)  
 ✅ **OpenSBI v1.8.1 Boots** - Full banner output on our from-scratch RV32IMA softcore  
@@ -1020,7 +1022,7 @@ You'll see the full OpenSBI v1.8.1 banner print to the console. From there, you 
 ---
 
 **Project Status:** COMPLETE! ✅  
-**Lines of SystemVerilog:** 2,580 lines  
+**Lines of SystemVerilog:** ~2,600 lines  
 **Bugs Fixed:** 29 critical bugs (all documented in `BUG_LOG.md`)  
 **Tests Created:** 200 tests with 100% pass rate  
 **Completion:** 100% of M-mode firmware requirements  

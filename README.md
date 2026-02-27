@@ -164,12 +164,12 @@ done
 ## Architecture
 
 **CPU Core** (`rtl/core/cpu_core.sv`)
-- Multi-cycle, non-pipelined, 10-state machine
+- Multi-cycle, non-pipelined, 11-state machine
 - RESET → FETCH → FETCH_WAIT → DECODE → EXECUTE → MEMORY → MEMORY_WAIT → WRITEBACK → TRAP
-- AMO path: EXECUTE → AMO_WRITE → AMO_WRITE_WAIT → WRITEBACK
+- AMO path: EXECUTE → MEMORY → MEMORY_WAIT → AMO_WRITE → AMO_WRITE_WAIT → WRITEBACK
 - Split ibus (instruction fetch, PC-driven) / dbus (data access, ALU-driven)
 - 32 general-purpose registers
-- Full M-mode CSR file (22 registers)
+- Full M-mode CSR file (40+ registers, including S-mode read-zero/write-ignore stubs)
 
 **M Extension** (`rtl/core/muldiv.sv`)
 - Single-cycle multiply, iterative divide

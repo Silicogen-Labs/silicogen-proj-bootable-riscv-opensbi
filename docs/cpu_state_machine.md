@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the state machine for the non-pipelined RV32IMAZicsr CPU core. The CPU operates as a Finite State Machine (FSM) that cycles through states to fetch, decode, and execute instructions.
+This document describes the state machine for the non-pipelined RV32IMAZicsr CPU core. The CPU operates as a Finite State Machine (FSM) with **11 states** that cycles through states to fetch, decode, and execute instructions.
 
 ## State Diagram
 
@@ -31,22 +31,34 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
     │    │ EXECUTE  │───────────────────────────────────┤ (branch/jump/most instructions)
     │    └────┬─────┘                                   │
     │         │                                          │
-    │         ├─────────────────┐                       │
-    │         │ (load/store)    │ (AMO*)                │
-    │         v                 v                        │
-    │    ┌──────────┐    ┌───────────┐                 │
-    │    │  MEMORY  │    │ AMO_WRITE │                 │
-    │    └────┬─────┘    └─────┬─────┘                 │
-    │         │                │                        │
-    │         v                v                        │
-    │    ┌───────────────┐  ┌──────────────────┐       │
-    │    │  MEMORY_WAIT  │  │ AMO_WRITE_WAIT   │       │
-    │    └───────┬───────┘  └────────┬─────────┘       │
-    │            │                   │                  │
-    │            └─────────┬─────────┘                 │
+    │         │ (load/store/AMO*)                       │
+    │         v                                          │
+    │    ┌──────────┐                                   │
+    │    │  MEMORY  │                                   │
+    │    └────┬─────┘                                   │
+    │         │                                          │
+    │         v                                          │
+    │    ┌───────────────┐                              │
+    │    │  MEMORY_WAIT  │                              │
+    │    └───────┬───────┘                              │
+    │            │                                       │
+    │            ├──────────────────┐                   │
+    │            │ (load/store)     │ (AMO*)            │
+    │            v                  v                    │
+    │    ┌────────────┐    ┌───────────┐               │
+    │    │ WRITEBACK  │    │ AMO_WRITE │               │
+    │    └────────────┘    └─────┬─────┘               │
+    │            │               │                      │
+    │            │               v                      │
+    │            │      ┌──────────────────┐            │
+    │            │      │ AMO_WRITE_WAIT   │            │
+    │            │      └────────┬─────────┘            │
+    │            │               │                      │
+    │            └───────────────┘                     │
+    │                      │ (→ FETCH or → WRITEBACK)  │
     │                      v                            │
     │    ┌────────────┐                                │
-    │    │ WRITEBACK  │────────────────────────────────┘
+    │    │ WRITEBACK  ├───────────────────────────────┘
     │    └────────────┘
     │            │
     │            │ (exception/interrupt)
@@ -115,15 +127,16 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
   - **Load Upper Immediate (LUI/AUIPC)**:
     - Calculate immediate value
     - Store in temporary register
-  - **Atomic (A-extension)**:
-    - Perform atomic read-modify-write
-    - Generate memory transaction
-  - **CSR Instructions (Zicsr)**:
-    - Read CSR value
-    - Perform CSR operation (read/write/set/clear)
-    - Check privilege level
+   - **Atomic (A-extension)**:
+     - Compute effective address (rs1 + imm)
+     - Compute the write-back value (ALU result on rs1 and rs2 for the AMO op)
+     - AMO proceeds via the normal MEMORY path for the read phase
+   - **CSR Instructions (Zicsr)**:
+     - Read CSR value
+     - Perform CSR operation (read/write/set/clear)
+     - Check privilege level
 - **Next State**:
-  - MEMORY (if load/store instruction)
+  - MEMORY (if load/store/AMO instruction)
   - WRITEBACK (if result needs to be written to register)
   - FETCH (if branch taken or jump)
   - TRAP (if exception occurs: illegal CSR access, misaligned access, etc.)
@@ -150,14 +163,15 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
   - Wait for bus ready signal
   - For **Load**: Capture data from bus and latch into temporary register
   - For **Store**: Wait for write acknowledgment
-  - For **Atomic**: Capture success/failure status
+  - For **Atomic (AMO*)**: Capture read data from bus; transition to AMO_WRITE to begin the write phase
 - **Next State**: 
-  - WRITEBACK (for loads)
-  - FETCH (for stores)
+  - WRITEBACK (for loads, when bus_ready)
+  - WRITEBACK (for stores, when bus_ready)
+  - AMO_WRITE (for atomics, when bus_ready — read phase complete, write phase follows)
   - TRAP (if bus error or misaligned access)
 
 ### AMO_WRITE
-- **Entry Condition**: Atomic memory operation (AMO*) after read-modify in EXECUTE
+- **Entry Condition**: Atomic memory operation (AMO*) after read phase completed in MEMORY_WAIT
 - **Actions**:
   - Present modified (post-ALU) value and effective address on bus
   - Assert bus write request with appropriate byte enables
@@ -211,15 +225,15 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
 | FETCH_WAIT | bus_ready | DECODE |
 | DECODE | valid_instruction | EXECUTE |
 | DECODE | illegal_instruction | TRAP |
-| EXECUTE | load/store | MEMORY |
-| EXECUTE | AMO* | AMO_WRITE |
+| EXECUTE | load/store/AMO | MEMORY |
 | EXECUTE | branch_taken | FETCH |
 | EXECUTE | jump | FETCH |
 | EXECUTE | other | WRITEBACK |
 | EXECUTE | exception | TRAP |
 | MEMORY | Always | MEMORY_WAIT |
 | MEMORY_WAIT | bus_ready & load | WRITEBACK |
-| MEMORY_WAIT | bus_ready & store | FETCH |
+| MEMORY_WAIT | bus_ready & store | WRITEBACK |
+| MEMORY_WAIT | bus_ready & atomic | AMO_WRITE |
 | MEMORY_WAIT | bus_error | TRAP |
 | AMO_WRITE | Always | AMO_WRITE_WAIT |
 | AMO_WRITE_WAIT | bus_ready | WRITEBACK |
@@ -229,7 +243,7 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
 
 ## Timing Considerations
 
-- **Minimum Instruction Execution**: 4 cycles (FETCH → FETCH_WAIT → DECODE → EXECUTE → WRITEBACK → FETCH)
+- **Minimum Instruction Execution**: 5 cycles (FETCH → FETCH_WAIT → DECODE → EXECUTE → WRITEBACK → FETCH)
 - **Load Instruction**: 6 cycles (includes MEMORY and MEMORY_WAIT)
 - **Store Instruction**: 5 cycles (no WRITEBACK needed)
 - **Branch Taken**: 4 cycles

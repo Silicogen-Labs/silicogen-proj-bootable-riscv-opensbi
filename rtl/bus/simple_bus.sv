@@ -1,6 +1,6 @@
 // simple_bus.sv
-// Simple bus arbiter for VexRiscv
-// Connects CPU (single master) to multiple slaves (RAM, UART)
+// Simple bus arbiter for Bootble RV32IMA SoC
+// Connects CPU (single master) to multiple slaves (RAM, UART, Timer)
 // Uses simple valid/ready handshake protocol
 
 module simple_bus (
