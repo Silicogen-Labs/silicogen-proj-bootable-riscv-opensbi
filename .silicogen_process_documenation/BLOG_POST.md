@@ -53,15 +53,19 @@ RTL (Register Transfer Level) code describes *what* hardware exists: "there's a 
 
 ### Our CPU State Machine
 
-We designed a simple, non-pipelined processor with 8 states:
+We designed a simple, non-pipelined processor with 10 states:
 
 ```
 STATE_RESET → STATE_FETCH → STATE_FETCH_WAIT → STATE_DECODE → 
 STATE_EXECUTE → STATE_MEMORY → STATE_MEMORY_WAIT → STATE_WRITEBACK → 
 (back to STATE_FETCH)
+
+AMO path: STATE_EXECUTE → STATE_AMO_WRITE → STATE_AMO_WRITE_WAIT → STATE_WRITEBACK
 ```
 
 **Why not pipelined?** Pipelining (where multiple instructions overlap in execution) is faster but *vastly* more complex. Hazards, forwarding, branch prediction—we'd spend months on that alone. For a first pass at booting firmware, a simple multi-cycle design is the pragmatic choice.
+
+**Why AMO_WRITE / AMO_WRITE_WAIT?** Atomic memory operations (AMO*) are a two-beat transaction: first a read (via the normal MEMORY/MEMORY_WAIT path), then a write of the modified value. Two dedicated states keep the write phase clean and allow the bus to signal errors independently.
 
 ### The Datapath
 
@@ -72,7 +76,7 @@ We documented how data flows through the processor:
 - **ALU**: Arithmetic and logic operations (add, subtract, shifts, comparisons)
 - **Multiply/Divide Unit**: Multi-cycle implementation of M-extension
 - **CSR File**: Privilege and trap handling registers
-- **Bus Interface**: Connects CPU to RAM and peripherals
+- **Split Bus Interface**: `ibus` carries instruction fetches (PC → RAM); `dbus` carries data loads, stores, and AMO transactions (ALU result → RAM/MMIO)
 
 ### Memory Map
 
