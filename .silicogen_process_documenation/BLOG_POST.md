@@ -1,6 +1,6 @@
-# Building a Bootable RISC-V Processor: The Journey from Silicon to OpenSBI
+# Building a RISC-V Soft Processor Core: From RTL to OpenSBI Boot with SilicogenAI
 
-*A deep dive into designing, implementing, and debugging a RISC-V RV32IMAZicsr processor in SystemVerilog, with the ultimate goal of booting real-world firmware.*
+*A deep dive into designing, implementing, and debugging a synthesizable RV32IMAZicsr soft processor core in SystemVerilog — from microarchitecture specification through RTL implementation to booting real-world firmware.*
 
 ## Table of Contents
 
@@ -19,13 +19,13 @@
 
 When you read about processors in textbooks, they're elegant abstractions: fetch, decode, execute, writeback. When you actually *build* one, you discover that the devil is in the details—and those details are everywhere.
 
-Our goal wasn't to build a toy CPU that could add two numbers. We set out to create, in just two days, a **verifiable hardware implementation** of a RISC-V processor sophisticated enough to boot real-world firmware like [OpenSBI](https://github.com/riscv-software-src/opensbi). This meant implementing the full **RV32IMAZicsr** standard for M-mode, including:
+Our goal wasn't to build a toy CPU that could add two numbers, or a software emulator that merely interprets instructions. We set out to create, in just two days, a **synthesizable soft processor core** — actual RTL hardware — sophisticated enough to boot real-world firmware like [OpenSBI](https://github.com/riscv-software-src/opensbi). This meant implementing the full **RV32IMAZicsr** standard for M-mode, including:
 
 - **RV32I**: The base 32-bit integer instruction set (40+ instructions)
 - **M Extension**: Integer multiplication and division
 - **Zicsr Extension**: Control and Status Register (CSR) instructions for privilege levels and trap handling
 
-This isn't a weekend project. This is a condensed, high-intensity sprint through the entire processor design lifecycle, from architecture to final validation. We're documenting every bug, every breakthrough, and every lesson learned in building a production-ready M-mode core from scratch.
+This isn't a software emulator or a weekend project. This is a condensed, high-intensity sprint through the entire **hardware processor design lifecycle** — from microarchitecture specification to synthesizable RTL to final validation. We're documenting every bug, every breakthrough, and every lesson learned in building a production-ready M-mode soft processor core from scratch.
 
 ---
 
@@ -976,27 +976,30 @@ In software, you can add a print statement and see what's happening. In hardware
 
 ## The Bigger Picture
 
-This project is inspired by Uros Popovic's articles on [RISC-V boot processes](https://popovicu.com/posts/risc-v-sbi-and-full-boot-process/) and [AI creating a bootable VM](https://popovicu.com/posts/ai-creates-bootable-vm/). Those articles used QEMU, a software emulator.
+This project is inspired by Uros Popovic's articles on [RISC-V boot processes](https://popovicu.com/posts/risc-v-sbi-and-full-boot-process/) and [AI creating a bootable VM](https://popovicu.com/posts/ai-creates-bootable-vm/). Those articles built software emulators that interpret RISC-V instructions.
 
-We did this in *hardware*. A from-scratch SystemVerilog CPU, simulated in Verilator, booting unmodified OpenSBI v1.8.1.
+We took a fundamentally different approach: **we built the actual hardware**. A from-scratch SystemVerilog soft processor core, cycle-accurate and synthesizable, simulated in Verilator, booting unmodified OpenSBI v1.8.1.
 
-That means our processor could eventually be:
-- Synthesized to an FPGA and run at hundreds of MHz
-- Taped out as an ASIC (with proper design tools and foundry access)
-- Extended with caches, pipelines, and advanced features
-- Used to boot Linux and run real applications
+**The key difference:** An emulator is software pretending to be hardware. Our RTL *is* the hardware — it describes the actual logic gates, registers, and wires that would exist in silicon.
 
-This is how real processors are built. Not perfectly on the first try, but iteratively, with careful design, rigorous testing, and systematic debugging.
+That means our soft processor core can be:
+- **Synthesized to an FPGA** and run at hundreds of MHz on real hardware
+- **Taped out as an ASIC** (with proper design tools and foundry access)
+- **Extended with caches, pipelines, and advanced features** for performance
+- **Used to boot Linux** and run real applications on physical silicon
+
+This is how real processors are built — not as software interpreters, but as RTL that becomes actual transistors and logic gates. Not perfectly on the first try, but iteratively, with careful design, rigorous testing, and systematic debugging.
 
 ---
 
 ## Acknowledgments
 
 This project stands on the shoulders of giants:
-- The RISC-V Foundation for creating an open, extensible ISA
-- The Verilator team for an incredible open-source simulator
-- The OpenSBI maintainers for production-grade firmware
-- Uros Popovic's excellent article on RISC-V boot processes
+- **The RISC-V Foundation** for creating an open, extensible ISA
+- **The Verilator team** for an incredible open-source RTL simulator
+- **The OpenSBI maintainers** for production-grade firmware
+- **Uros Popovic** for excellent articles on RISC-V boot processes that inspired this hardware implementation
+- **SilicogenAI** for AI-assisted RTL design and debugging
 - Countless contributors to the RISC-V ecosystem
 
 ---
