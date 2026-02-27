@@ -162,8 +162,8 @@ dbus ◄──────────────│─────────
   - `SRA`: operand_a >>> operand_b[4:0] (arithmetic right shift)
   - `SLT`: (signed)operand_a < (signed)operand_b ? 1 : 0
   - `SLTU`: (unsigned)operand_a < (unsigned)operand_b ? 1 : 0
-  - `PASS_A`: operand_a (used for LUI/AUIPC)
-  - `PASS_B`: operand_b
+  - `PASS_A`: pass operand_a through unchanged (for LUI/AUIPC)
+  - `PASS_B`: pass operand_b through unchanged
 - **Inputs**:
   - `operand_a` (32-bit): typically rs1_data
   - `operand_b` (32-bit): rs2_data or immediate
@@ -192,7 +192,7 @@ dbus ◄──────────────│─────────
 - **Outputs**:
   - `muldiv_result` (32-bit)
   - `done`: Operation complete
-  - `busy`: Operation in progress (used to stall the core)
+  - `busy`: Operation in progress (asserted from start until done)
 
 ### 8. CSR File (Zicsr Extension)
 - **Function**: Control and Status Registers
@@ -319,10 +319,13 @@ dbus ◄──────────────│─────────
 
 ## Atomic Operations (A-Extension)
 
-For atomic operations (LR.W, SC.W, AMO*), the implementation uses:
-- **Standard dbus interface**: No special atomic bus signals; atomics are implemented as two-phase transactions (read via MEMORY/MEMORY_WAIT, then write via AMO_WRITE/AMO_WRITE_WAIT)
-- **AMO write-back register**: Stores the computed write value (rs2 or ALU result of old value + rs2, etc.) during EXECUTE for later use in AMO_WRITE
-- **No hardware reservation register**: LR/SC semantics are handled by the bus/memory controller if needed (not currently implemented in this simple single-core design)
+For atomic operations (LR.W, SC.W, AMO*), the datapath uses the standard load/store path plus two dedicated AMO write states:
+
+- **AMO Read Phase**: Uses the normal `MEMORY` and `MEMORY_WAIT` states to perform the initial load, just like a regular `LW` instruction
+- **AMO Modify**: During `EXECUTE`, the modified value is computed via the ALU (e.g., `old_value + rs2` for `AMOADD`) and latched in `amo_write_data`
+- **AMO Write Phase**: After `MEMORY_WAIT` completes the read, the FSM transitions to `AMO_WRITE` and `AMO_WRITE_WAIT` states to write back the modified value
+- **No Reservation Register**: This simple implementation does not use a reservation register; atomicity is guaranteed by the non-pipelined single-core design and uninterrupted bus transactions
+- **Standard Bus Signals**: The dbus uses the same ready/valid handshake as for loads and stores; no special atomic protocol signals are required
 
 ## Critical Timing Paths
 

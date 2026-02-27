@@ -129,7 +129,7 @@ CSRs are accessed using a 12-bit address space (0x000 - 0xFFF). The address form
                      10, 11 = Reserved
 ```
 
-**Implementation Note**: This core **only supports direct mode** (MODE = 00). Writes to MODE bits [1:0] are silently ignored; they are hardwired to 0 in the RTL. Vectored mode is not implemented.
+**Implementation Note**: This core **only supports direct mode** (MODE=00). Writes to `mtvec` force bits [1:0] to `2'b00`, so vectored mode is not available.
 
 **Usage**: OpenSBI will write this register to set up its trap handler
 
@@ -372,34 +372,39 @@ CSRs are accessed using a 12-bit address space (0x000 - 0xFFF). The address form
 
 ---
 
-### Additional CSRs Implemented (Beyond OpenSBI Minimum)
-
-This core implements **40+ CSRs total**, including:
-
-#### `CSR_SEED` (Entropy Source)
+#### 24. `seed` (Entropy Source)
 - **Address**: 0x015
 - **Access**: Read-only
-- **Function**: Returns `{2'b10, mcycle[29:0]}` — a simple entropy source for OpenSBI
-- **Note**: Not a cryptographically secure random number generator
+- **Function**: Provides entropy for random number generation (RISC-V entropy source extension)
+- **Implementation**: Returns `{2'b10, mcycle[29:0]}` (ES16 state = BIST, concatenated with lower 30 bits of cycle counter)
 
-#### S-mode CSR Stubs (Read-Zero, Write-Ignore)
-The following Supervisor-mode CSRs are implemented as **stubs** to allow OpenSBI to probe for S-mode support without trapping. All reads return 0; all writes are silently ignored:
-- `sstatus` (0x100), `sie` (0x104), `stvec` (0x105), `scounteren` (0x106)
-- `sscratch` (0x140), `sepc` (0x141), `scause` (0x142), `stval` (0x143)
-- `sip` (0x144), `satp` (0x180)
+**Note**: This is a non-standard CSR used by some firmware for initialization randomness.
 
-#### Machine Extension Stubs (Read-Zero, Write-Ignore)
-- `mstatush` (0x310), `medeleg` (0x302), `mideleg` (0x303), `mcounteren` (0x306), `mcountinhibit` (0x320)
+---
 
-#### PMP Configuration Stubs (Read-Zero, Write-Ignore)
-- `pmpcfg0` through `pmpcfg3` (0x3A0–0x3A3)
-- 16 `pmpaddr` registers (not individually listed but present in the RTL)
+### Supervisor-Mode CSR Stubs
 
-These stubs allow OpenSBI to perform feature detection and configuration writes without generating illegal instruction exceptions, even though the core does not actually implement S-mode or PMP hardware.
+The following S-mode CSRs are implemented as **read-zero, write-ignore stubs** to allow S-mode-aware firmware (like OpenSBI) to access them without trapping, even though this core operates exclusively in M-mode:
 
-#### MEIE (Machine External Interrupt Enable) Note
-- **Bit 11 of `mie`** is writable, but this core has **no external interrupt source** connected.
-- Writing 1 to MEIE will not cause external interrupts to occur because no PLIC or external interrupt controller is present in the current SoC design.
+- `sstatus` (0x100)
+- `sie` (0x104)
+- `stvec` (0x105)
+- `scounteren` (0x106)
+- `sscratch` (0x140)
+- `sepc` (0x141)
+- `scause` (0x142)
+- `stval` (0x143)
+- `sip` (0x144)
+- `satp` (0x180)
+
+**Behavior**: Reads return 0; writes are silently ignored (no trap).
+
+---
+
+### Additional Implementation Notes
+
+- **MEIE (bit 11 of `mie`)**: This bit is writable, but the core does not have an external interrupt controller connected, so external interrupts cannot actually occur.
+- **Total CSR Count**: 40+ CSRs are implemented (including M-mode functional registers, S-mode stubs, and PMP/extension stubs).
 
 ---
 

@@ -157,8 +157,6 @@ case (alu_op)
     ALU_OP_SRA:  result = $signed(a) >>> b[4:0];
     ALU_OP_OR:   result = a | b;
     ALU_OP_AND:  result = a & b;
-    ALU_PASS_A:  result = a;  // Used for LUI/AUIPC
-    ALU_PASS_B:  result = b;
 endcase
 ```
 
@@ -650,7 +648,7 @@ After completing all seven phases in an intense two-day sprint, the project achi
 ✅ **Full Exception Handling** - All 9 exception types implemented and tested  
 ✅ **Full Interrupt System** - Timer and software interrupts with priority handling  
 ✅ **Complete Trap Infrastructure** - `ECALL`, `EBREAK`, `MRET` working perfectly  
-✅ **40+ CSRs Implemented** - All M-mode registers plus S-mode read-zero/write-ignore stubs  
+✅ **40+ CSRs Implemented** - All M-mode registers plus S-mode read-zero/write-ignore stubs for compatibility  
 ✅ **Memory-Mapped Peripherals** - UART and Timer fully integrated  
 ✅ **100% Test Pass Rate** - 200 tests passing (187 ISA + 13 custom)  
 ✅ **OpenSBI v1.8.1 Boots** - Full banner output on our from-scratch RV32IMA softcore  
@@ -1022,7 +1020,7 @@ You'll see the full OpenSBI v1.8.1 banner print to the console. From there, you 
 ---
 
 **Project Status:** COMPLETE! ✅  
-**Lines of SystemVerilog:** ~2,600 lines  
+**Lines of SystemVerilog:** ~2,680 lines  
 **Bugs Fixed:** 29 critical bugs (all documented in `BUG_LOG.md`)  
 **Tests Created:** 200 tests with 100% pass rate  
 **Completion:** 100% of M-mode firmware requirements  
