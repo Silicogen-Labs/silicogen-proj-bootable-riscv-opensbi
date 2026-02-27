@@ -13,38 +13,40 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
               │
               v
          ┌─────────┐
-    ┌───►│  FETCH  │◄────────────────────────┐
-    │    └────┬────┘                         │
-    │         │                              │
-    │         v                              │
-    │    ┌──────────────┐                   │
-    │    │  FETCH_WAIT  │                   │
-    │    └──────┬───────┘                   │
-    │           │                            │
-    │           v                            │
-    │    ┌─────────┐                        │
-    │    │ DECODE  │                        │
-    │    └────┬────┘                        │
-    │         │                              │
-    │         v                              │
-    │    ┌──────────┐                       │
-    │    │ EXECUTE  │───────────────────────┤ (branch/jump/most instructions)
-    │    └────┬─────┘                       │
-    │         │                              │
-    │         │ (load/store)                │
-    │         v                              │
-    │    ┌──────────┐                       │
-    │    │  MEMORY  │                       │
-    │    └────┬─────┘                       │
-    │         │                              │
-    │         v                              │
-    │    ┌───────────────┐                  │
-    │    │  MEMORY_WAIT  │                  │
-    │    └───────┬───────┘                  │
-    │            │                           │
-    │            v                           │
-    │    ┌────────────┐                     │
-    │    │ WRITEBACK  │─────────────────────┘
+    ┌───►│  FETCH  │◄────────────────────────────────────┐
+    │    └────┬────┘                                     │
+    │         │                                          │
+    │         v                                          │
+    │    ┌──────────────┐                               │
+    │    │  FETCH_WAIT  │                               │
+    │    └──────┬───────┘                               │
+    │           │                                        │
+    │           v                                        │
+    │    ┌─────────┐                                    │
+    │    │ DECODE  │                                    │
+    │    └────┬────┘                                    │
+    │         │                                          │
+    │         v                                          │
+    │    ┌──────────┐                                   │
+    │    │ EXECUTE  │───────────────────────────────────┤ (branch/jump/most instructions)
+    │    └────┬─────┘                                   │
+    │         │                                          │
+    │         ├─────────────────┐                       │
+    │         │ (load/store)    │ (AMO*)                │
+    │         v                 v                        │
+    │    ┌──────────┐    ┌───────────┐                 │
+    │    │  MEMORY  │    │ AMO_WRITE │                 │
+    │    └────┬─────┘    └─────┬─────┘                 │
+    │         │                │                        │
+    │         v                v                        │
+    │    ┌───────────────┐  ┌──────────────────┐       │
+    │    │  MEMORY_WAIT  │  │ AMO_WRITE_WAIT   │       │
+    │    └───────┬───────┘  └────────┬─────────┘       │
+    │            │                   │                  │
+    │            └─────────┬─────────┘                 │
+    │                      v                            │
+    │    ┌────────────┐                                │
+    │    │ WRITEBACK  │────────────────────────────────┘
     │    └────────────┘
     │            │
     │            │ (exception/interrupt)
@@ -154,6 +156,24 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
   - FETCH (for stores)
   - TRAP (if bus error or misaligned access)
 
+### AMO_WRITE
+- **Entry Condition**: Atomic memory operation (AMO*) after read-modify in EXECUTE
+- **Actions**:
+  - Present modified (post-ALU) value and effective address on bus
+  - Assert bus write request with appropriate byte enables
+  - Hold all signals stable until bus accepts the transaction
+- **Next State**: AMO_WRITE_WAIT
+
+### AMO_WRITE_WAIT
+- **Entry Condition**: AMO write transaction issued
+- **Actions**:
+  - Wait for bus ready signal confirming the write completed
+  - The original loaded value (captured during the preceding read) is already
+    latched for writeback to `rd`
+- **Next State**:
+  - WRITEBACK (write original loaded value to `rd`, then advance PC)
+  - TRAP (if bus error occurs)
+
 ### WRITEBACK
 - **Entry Condition**: Instruction execution completed with result
 - **Actions**:
@@ -192,6 +212,7 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
 | DECODE | valid_instruction | EXECUTE |
 | DECODE | illegal_instruction | TRAP |
 | EXECUTE | load/store | MEMORY |
+| EXECUTE | AMO* | AMO_WRITE |
 | EXECUTE | branch_taken | FETCH |
 | EXECUTE | jump | FETCH |
 | EXECUTE | other | WRITEBACK |
@@ -200,6 +221,9 @@ This document describes the state machine for the non-pipelined RV32IMAZicsr CPU
 | MEMORY_WAIT | bus_ready & load | WRITEBACK |
 | MEMORY_WAIT | bus_ready & store | FETCH |
 | MEMORY_WAIT | bus_error | TRAP |
+| AMO_WRITE | Always | AMO_WRITE_WAIT |
+| AMO_WRITE_WAIT | bus_ready | WRITEBACK |
+| AMO_WRITE_WAIT | bus_error | TRAP |
 | WRITEBACK | Always | FETCH |
 | TRAP | Always | FETCH |
 

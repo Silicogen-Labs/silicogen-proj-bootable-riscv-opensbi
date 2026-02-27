@@ -16,11 +16,17 @@ This document defines the complete memory address space for the Bootble RISC-V S
 0x003FFFFF └──────────────────────────────────┘
            │                                  │
            │        Reserved / Unused         │
-           │          (~252 MB)               │
+           │                                  │
+0x02000000 ┌──────────────────────────────────┐
+           │     CLINT Timer Registers        │
+           │  mtime / mtimecmp (RISC-V std)   │
+0x02FFFFFF └──────────────────────────────────┘
+           │                                  │
+           │        Reserved / Unused         │
            │                                  │
 0x10000000 ┌──────────────────────────────────┐
            │     UART 16550a Registers        │
-           │           (256 bytes)            │
+           │   (256 bytes, reg-shift=2)       │
 0x100000FF └──────────────────────────────────┘
            │                                  │
            │        Reserved / Unused         │
@@ -75,7 +81,33 @@ This document defines the complete memory address space for the Bootble RISC-V S
 
 ---
 
-### 2. UART 16550a (Serial Console)
+### 2. CLINT Timer
+
+- **Base Address**: `0x02000000`
+- **End Address**: `0x02FFFFFF`
+- **Size**: 16 MB region (RISC-V standard CLINT address space)
+- **Compatible With**: RISC-V CLINT (Core Local Interruptor)
+- **Purpose**: Provides `mtime` and `mtimecmp` for timer interrupts
+
+#### Timer Register Map
+
+| Address | Name | Access | Description |
+|---------|------|--------|-------------|
+| `0x0200BFF8` | `mtime` (low) | R/W | Machine timer counter, lower 32 bits |
+| `0x0200BFFC` | `mtime` (high) | R/W | Machine timer counter, upper 32 bits |
+| `0x02004000` | `mtimecmp` (low) | R/W | Timer compare register, lower 32 bits |
+| `0x02004004` | `mtimecmp` (high) | R/W | Timer compare register, upper 32 bits |
+
+#### Timer Interrupt Behavior
+
+- `timer_irq` is asserted when `mtime >= mtimecmp`
+- Writing to `mtimecmp` clears the interrupt
+- `mtime` increments every clock cycle
+- OpenSBI uses this for SBI timer extensions
+
+---
+
+### 3. UART 16550a (Serial Console)
 
 - **Base Address**: `0x10000000`
 - **End Address**: `0x100000FF`
@@ -183,9 +215,10 @@ OpenSBI expects the following UART configuration:
 - **Stop Bits**: 1
 - **Parity**: None
 - **Clock Frequency**: Specified in device tree (`clock-frequency` property)
-- **Register Width**: 32-bit aligned (though only lower 8 bits used)
-- **Register Stride**: `reg-shift = 0` in device tree means registers are byte-aligned, but we implement 32-bit word-aligned
-- **Register I/O Width**: `reg-io-width = 4` (32-bit reads/writes)
+- **Register Width**: 32-bit word-aligned
+- **Register Stride**: `reg-shift = <2>` — registers spaced 4 bytes apart (e.g. LSR at `0x10000014`)
+- **Register I/O Width**: `reg-io-width = <4>` (32-bit reads/writes)
+- **Hardware Decode**: `addr[4:2]` extracts the register index (0–7)
 
 #### Minimal UART Implementation for Boot
 
@@ -205,17 +238,25 @@ The bus arbiter uses the following logic to route addresses:
 always_comb begin
     if (bus_addr >= 32'h00000000 && bus_addr < 32'h00400000) begin
         // RAM region
-        ram_select = 1'b1;
-        uart_select = 1'b0;
+        ram_select   = 1'b1;
+        uart_select  = 1'b0;
+        timer_select = 1'b0;
+    end else if (bus_addr >= 32'h02000000 && bus_addr < 32'h03000000) begin
+        // CLINT timer region
+        ram_select   = 1'b0;
+        uart_select  = 1'b0;
+        timer_select = 1'b1;
     end else if (bus_addr >= 32'h10000000 && bus_addr < 32'h10000100) begin
         // UART region
-        ram_select = 1'b0;
-        uart_select = 1'b1;
+        ram_select   = 1'b0;
+        uart_select  = 1'b1;
+        timer_select = 1'b0;
     end else begin
         // Unmapped address - generate bus error
-        ram_select = 1'b0;
-        uart_select = 1'b0;
-        bus_error = 1'b1;
+        ram_select   = 1'b0;
+        uart_select  = 1'b0;
+        timer_select = 1'b0;
+        bus_error    = 1'b1;
     end
 end
 ```
@@ -266,6 +307,7 @@ Cycle 1: Wait for ready=1, capture rdata (from appropriate byte lane), then deas
 | Region | Execute | Read | Write | Cacheable |
 |--------|---------|------|-------|-----------|
 | RAM | Yes | Yes | Yes | Yes (future) |
+| Timer (CLINT) | No | Yes | Yes | No |
 | UART | No | Yes | Yes | No |
 | Unmapped | No | No | No | No (causes exception) |
 
@@ -300,12 +342,18 @@ memory@0 {
     reg = <0x00000000 0x00400000>;  // Base=0x0, Size=4MB
 };
 
+clint@2000000 {
+    compatible = "riscv,clint0";
+    reg = <0x02000000 0x10000>;     // Base=0x02000000
+    interrupts-extended = <&cpu0_intc 3 &cpu0_intc 7>;
+};
+
 uart@10000000 {
     compatible = "ns16550a";
-    reg = <0x10000000 0x100>;  // Base=0x10000000, Size=256 bytes
-    clock-frequency = <50000000>;  // 50 MHz
-    reg-shift = <0>;               // No shift (byte addressing)
-    reg-io-width = <4>;            // 32-bit register access
+    reg = <0x10000000 0x100>;       // Base=0x10000000, Size=256 bytes
+    clock-frequency = <50000000>;   // 50 MHz
+    reg-shift = <2>;                // Registers spaced 4 bytes apart (addr[4:2])
+    reg-io-width = <4>;             // 32-bit register access
 };
 ```
 

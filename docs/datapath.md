@@ -21,81 +21,82 @@ This document describes the datapath for the RV32IMAZicsr CPU core. The datapath
                     │  └──────┬──────┘        │   Decoder    │      │
                     │         │               └──────┬───────┘      │
                     │         │                      │              │
-Bus ◄──────────────►│  ┌──────▼──────────┐         │              │
-Interface           │  │   Address Mux   │         │              │
-                    │  └──────┬──────────┘         │              │
-                    │         │                    v              │
-                    │         │            ┌─────────────────┐    │
-                    │         │            │ Instruction Reg │    │
-                    │         │            │   (IR, 32-bit)  │    │
-                    │         │            └────────┬────────┘    │
-                    │         │                     │             │
-                    │         │         ┌───────────┼───────────┐ │
-                    │         │         │           │           │ │
-                    │         │         v           v           v │
-                    │         │     ┌────────┐  ┌────────┐  ┌─────┐
-                    │         │     │  rs1   │  │  rs2   │  │ rd  │
-                    │         │     │(5-bit) │  │(5-bit) │  │(5)  │
-                    │         │     └───┬────┘  └───┬────┘  └──┬──┘
-                    │         │         │           │          │  │
-                    │         │         v           v          │  │
-                    │         │   ┌─────────────────────────┐  │  │
-                    │         │   │   Register File         │  │  │
-                    │         │   │   32 x 32-bit regs      │  │  │
-                    │         │   │   x0 hardwired to 0     │  │  │
-                    │         │   │   2 read, 1 write port  │  │  │
-                    │         │   └──────┬──────┬───────────┘  │  │
-                    │         │          │      │              │  │
-                    │         │       rs1_data  rs2_data       │  │
-                    │         │          │      │              │  │
-                    │         │          v      v              │  │
-                    │         │      ┌──────────────┐          │  │
-                    │         │      │  Immediate   │          │  │
-                    │         │      │  Generator   │          │  │
-                    │         │      └──────┬───────┘          │  │
-                    │         │             │ imm              │  │
-                    │         │             v                  │  │
-                    │         │      ┌─────────────────┐       │  │
-                    │         │      │   Operand Mux   │       │  │
-                    │         │      │  (rs2 or imm)   │       │  │
-                    │         │      └──────┬──────────┘       │  │
-                    │         │             │                  │  │
-                    │         │        operand_a  operand_b    │  │
-                    │         │             │      │           │  │
-                    │         │             v      v           │  │
-                    │         │      ┌─────────────────┐       │  │
-                    │         │      │       ALU       │       │  │
-                    │         │      │   (32-bit)      │       │  │
-                    │         │      │  ADD,SUB,AND... │       │  │
-                    │         │      └──────┬──────────┘       │  │
-                    │         │             │ alu_result       │  │
-                    │         │             v                  │  │
-                    │         │      ┌─────────────────┐       │  │
-                    │         │      │    MUL/DIV      │       │  │
-                    │         │      │  (M-extension)  │       │  │
-                    │         │      └──────┬──────────┘       │  │
-                    │         │             │ muldiv_result    │  │
-                    │         │             v                  │  │
-                    │         │      ┌─────────────────┐       │  │
-                    │         │      │   CSR File      │       │  │
-                    │         │      │  (Zicsr ext)    │       │  │
-                    │         │      └──────┬──────────┘       │  │
-                    │         │             │ csr_data         │  │
-                    │         │             v                  │  │
-                    │         │      ┌─────────────────┐       │  │
-                    │         │      │  Writeback Mux  │       │  │
-                    │         │      │ (select result) │       │  │
-                    │         │      └──────┬──────────┘       │  │
-                    │         │             │ write_data       │  │
-                    │         │             │                  │  │
-                    │         │             └──────────────────┘  │
-                    │         │                     │             │
-                    │         │                     v             │
-                    │         │              (back to reg file)   │
-                    │         │                                   │
-                    │         └─────► Bus Address                │
-                    │                                             │
-                    └─────────────────────────────────────────────┘
+ibus ◄──────────────│─────────┘                     │              │
+(instruction bus)   │                               │              │
+                    │                               v              │
+                    │                    ┌─────────────────┐       │
+                    │                    │ Instruction Reg │       │
+                    │                    │   (IR, 32-bit)  │       │
+                    │                    └────────┬────────┘       │
+                    │                             │                │
+                    │                 ┌───────────┼───────────┐   │
+                    │                 │           │           │   │
+                    │                 v           v           v   │
+                    │             ┌────────┐  ┌────────┐  ┌─────┐│
+                    │             │  rs1   │  │  rs2   │  │ rd  ││
+                    │             │(5-bit) │  │(5-bit) │  │(5)  ││
+                    │             └───┬────┘  └───┬────┘  └──┬──┘│
+                    │                 │           │          │   │
+                    │                 v           v          │   │
+                    │           ┌─────────────────────────┐  │   │
+                    │           │   Register File         │  │   │
+                    │           │   32 x 32-bit regs      │  │   │
+                    │           │   x0 hardwired to 0     │  │   │
+                    │           │   2 read, 1 write port  │  │   │
+                    │           └──────┬──────┬───────────┘  │   │
+                    │                  │      │              │   │
+                    │               rs1_data  rs2_data       │   │
+                    │                  │      │              │   │
+                    │                  v      v              │   │
+                    │              ┌──────────────┐          │   │
+                    │              │  Immediate   │          │   │
+                    │              │  Generator   │          │   │
+                    │              └──────┬───────┘          │   │
+                    │                     │ imm              │   │
+                    │                     v                  │   │
+                    │              ┌─────────────────┐       │   │
+                    │              │   Operand Mux   │       │   │
+                    │              │  (rs2 or imm)   │       │   │
+                    │              └──────┬──────────┘       │   │
+                    │                     │                  │   │
+                    │                operand_a  operand_b    │   │
+                    │                     │      │           │   │
+                    │                     v      v           │   │
+                    │              ┌─────────────────┐       │   │
+                    │              │       ALU       │       │   │
+                    │              │   (32-bit)      │       │   │
+                    │              │  ADD,SUB,AND... │       │   │
+                    │              └──────┬──────────┘       │   │
+                    │                     │ alu_result       │   │
+                    │                     v                  │   │
+                    │              ┌─────────────────┐       │   │
+                    │              │    MUL/DIV      │       │   │
+                    │              │  (M-extension)  │       │   │
+                    │              └──────┬──────────┘       │   │
+                    │                     │ muldiv_result    │   │
+                    │                     v                  │   │
+                    │              ┌─────────────────┐       │   │
+                    │              │   CSR File      │       │   │
+                    │              │  (Zicsr ext)    │       │   │
+                    │              └──────┬──────────┘       │   │
+                    │                     │ csr_data         │   │
+                    │                     v                  │   │
+                    │              ┌─────────────────┐       │   │
+                    │              │  Writeback Mux  │       │   │
+                    │              │ (select result) │       │   │
+                    │              └──────┬──────────┘       │   │
+                    │                     │ write_data       │   │
+                    │                     │                  │   │
+                    │                     └──────────────────┘   │
+                    │                             │              │
+                    │                             v              │
+                    │                      (back to reg file)    │
+                    │                                            │
+                    │    alu_result ──────────► dbus Address     │
+                    │                                            │
+dbus ◄──────────────│────────────────────────────────────────────┘
+(data bus)
+                    └────────────────────────────────────────────┘
 ```
 
 ## Datapath Components
@@ -223,12 +224,17 @@ Interface           │  │   Address Mux   │         │              │
 
 ### 10. Multiplexers
 
-#### Address Multiplexer
-- **Function**: Select address for bus transaction
+#### Instruction Bus Address (ibus)
+- **Function**: Carries PC directly to the instruction memory port
+- **Input**: PC register (32-bit)
+- **Output**: ibus_addr (32-bit) — always word-aligned (PC[1:0] == 2'b00)
+- **Note**: No mux required; PC is hardwired to the ibus address port
+
+#### Data Bus Address Multiplexer (dbus)
+- **Function**: Select address for data memory / MMIO transactions
 - **Inputs**:
-  - PC (for instruction fetch)
-  - alu_result (for data memory access)
-- **Output**: bus_address (32-bit)
+  - alu_result (for load, store, and AMO data accesses)
+- **Output**: dbus_addr (32-bit)
 
 #### Operand B Multiplexer
 - **Function**: Select second ALU operand
@@ -260,7 +266,7 @@ Interface           │  │   Address Mux   │         │              │
 
 ### Example 1: ADD x3, x1, x2
 ```
-1. FETCH: PC → Bus → IR receives instruction
+1. FETCH: PC → ibus → IR receives instruction
 2. DECODE: 
    - Extract rs1=x1, rs2=x2, rd=x3, opcode=ADD
    - Read x1 → rs1_data, Read x2 → rs2_data
@@ -275,7 +281,7 @@ Interface           │  │   Address Mux   │         │              │
 
 ### Example 2: LW x5, 8(x2)
 ```
-1. FETCH: PC → Bus → IR receives instruction
+1. FETCH: PC → ibus → IR receives instruction
 2. DECODE:
    - Extract rs1=x2, rd=x5, imm=8, opcode=LW
    - Read x2 → rs1_data
@@ -283,11 +289,11 @@ Interface           │  │   Address Mux   │         │              │
    - operand_a = rs1_data, operand_b = imm (8)
    - ALU performs: alu_result = operand_a + operand_b (effective address)
 4. MEMORY:
-   - Bus Address = alu_result
-   - Assert bus read
+   - dbus Address = alu_result
+   - Assert dbus read
 5. MEMORY_WAIT:
-   - Wait for bus_ready
-   - Capture bus_rdata → mem_rdata
+   - Wait for dbus_ready
+   - Capture dbus_rdata → mem_rdata
 6. WRITEBACK:
    - write_data = mem_rdata
    - Write write_data to x5
@@ -296,7 +302,7 @@ Interface           │  │   Address Mux   │         │              │
 
 ### Example 3: BEQ x1, x2, offset
 ```
-1. FETCH: PC → Bus → IR receives instruction
+1. FETCH: PC → ibus → IR receives instruction
 2. DECODE:
    - Extract rs1=x1, rs2=x2, imm=offset, opcode=BEQ
    - Read x1 → rs1_data, Read x2 → rs2_data
@@ -312,7 +318,7 @@ Interface           │  │   Address Mux   │         │              │
 
 For atomic operations (LR.W, SC.W, AMO*), the datapath includes:
 - **Reservation Register**: Stores address for LR/SC
-- **Atomic Bus Protocol**: Special bus signals for atomic transactions
+- **Atomic Bus Protocol**: Special dbus signals for atomic transactions
 - **AMO ALU**: Performs atomic read-modify-write operations
 
 ## Critical Timing Paths
@@ -320,7 +326,21 @@ For atomic operations (LR.W, SC.W, AMO*), the datapath includes:
 For FPGA synthesis, these are the longest combinational paths:
 1. **ALU Path**: Register file → ALU → Writeback mux → Register file
 2. **Branch Path**: Register file → Branch condition → PC mux → PC
-3. **Memory Address**: Register file → ALU → Bus address
+3. **Data Memory Address**: Register file → ALU → dbus address
+
+## Split Bus Architecture
+
+The CPU exposes two independent bus interfaces to the SoC:
+
+| Bus | Direction | Address Source | Used In States |
+|-----|-----------|----------------|----------------|
+| **ibus** (instruction) | read-only | PC register | FETCH, FETCH_WAIT |
+| **dbus** (data) | read/write | ALU result | MEMORY, MEMORY_WAIT, AMO_WRITE, AMO_WRITE_WAIT |
+
+Both buses use the same ready/valid handshake protocol. Because the CPU is
+non-pipelined, only one bus is active at any given time — they will never
+contend — but keeping them separate simplifies address decode and allows a
+Harvard-style cache split in future revisions.
 
 ## Register Naming (ABI Convention)
 
@@ -343,4 +363,6 @@ For FPGA synthesis, these are the longest combinational paths:
 - All data paths are 32-bit wide
 - No forwarding or bypassing (non-pipelined)
 - Multi-cycle operations stall the entire pipeline
-- Bus interface is synchronous with ready/valid handshake
+- Split ibus/dbus: instruction fetches use ibus (PC as address); all data
+  memory accesses (load, store, AMO) use dbus (ALU result as address)
+- Both bus interfaces use synchronous ready/valid handshake
