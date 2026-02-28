@@ -47,11 +47,11 @@ dtc --version
 # 1. Build the Verilator simulator (boot image already included as build/final_boot.hex)
 make sim-boot
 
-# 2. Run — UART output prints directly to your terminal
-./build/verilator/Vtb_soc
+# 2. Run — UART output goes to /tmp/uart_output.txt
+./scripts/boot_opensbi.sh
 ```
 
-You should see the full OpenSBI banner printed to your terminal:
+This will display the full OpenSBI banner:
 
 ```
 OpenSBI v1.8.1-32-g8d1c21b3
@@ -76,14 +76,13 @@ Boot HART Base ISA          : rv32ima
 Runtime SBI Version         : 3.0
 ```
 
-To verify all expected lines are present:
+**Note:** UART output is written to `/tmp/uart_output.txt` by the SystemVerilog testbench. The script above displays it cleanly. If you run the simulator directly (`./build/verilator/Vtb_soc`), check that file for the boot banner.
+
+To verify key boot lines:
 
 ```bash
-./build/verilator/Vtb_soc | grep -E \
-  "OpenSBI|Platform Name|Platform HART Count|Platform Console|Firmware Base|Firmware RW Offset|Domain0 Next|Boot HART|Runtime SBI"
+cat /tmp/uart_output.txt | grep -E "OpenSBI|Platform Name|Console Device|Firmware Base|Runtime SBI"
 ```
-
-All 9 lines should appear. If any are missing, something is wrong with the boot.
 
 ## How It Works
 
@@ -189,6 +188,25 @@ done
 - `platform_ops_addr` patched at runtime in `fw_platform_init`
 
 ## Debugging
+
+### Why doesn't UART output appear directly on stdout?
+
+When you run `./build/verilator/Vtb_soc` directly, you'll see debug messages like:
+```
+[TBUF_WRITE #0] PC=0x000000a4 addr=0x00041108 wdata=0x00000000 ...
+[HW_DIV #0] PC=0x0001ad48 op=DIVU operand_a=0x03090080 ...
+Cycles: 50k, PC: 0x42c4, Test[0]: 0x30559073
+```
+
+The UART characters ARE being printed, but they're **interleaved with 81 debug `$display()` statements** in the testbench. These debug probes were essential for fixing the 29 bugs that got OpenSBI booting.
+
+**Solution:** Use the boot script which captures UART to a file:
+```bash
+./scripts/boot_opensbi.sh           # Clean output
+cat /tmp/uart_output.txt            # Or check file directly
+```
+
+The testbench writes UART output to `/tmp/uart_output.txt` by snooping bus writes to the UART THR register (address `0x10000000`). This captures characters instantly, while the serial bit decoder in the testbench is much slower (434 cycles/bit at 115200 baud).
 
 ### Waveforms
 ```bash

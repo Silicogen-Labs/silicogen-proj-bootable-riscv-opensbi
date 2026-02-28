@@ -881,6 +881,11 @@ module tb_soc(
             // Write character to file (only byte 0)
             $fwrite(uart_file, "%c", dut.u_simple_bus.dbus_wdata[7:0]);
             $fflush(uart_file);
+            
+            // Print character to stdout immediately (bus snoop, not serial decode)
+            $write("%c", dut.u_simple_bus.dbus_wdata[7:0]);
+            $fflush();
+            
             uart_write_count <= uart_write_count + 1;
         end
     end
