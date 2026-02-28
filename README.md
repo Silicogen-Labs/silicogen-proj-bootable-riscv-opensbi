@@ -132,6 +132,8 @@ make sim-boot
 
 ## Running Unit Tests
 
+**⚠️ Important:** Unit tests are **different** from booting OpenSBI. Unit tests load small test programs, while OpenSBI boot loads the full firmware image.
+
 The processor passes a full suite of RV32IMA unit tests:
 
 ```bash
@@ -147,6 +149,8 @@ for t in test_alu test_memory test_branch test_muldiv test_trap \
     timeout 30 ./build/verilator/Vtb_soc 2>&1 | grep -E "PASS|FAIL|OK|FIRMWARE"
 done
 ```
+
+**Note:** If you see "64 TESTS FAILED" with instructions in memory, you likely ran `make TEST=something` which loads a test program instead of OpenSBI. To boot OpenSBI, use `make sim-boot` instead (see "Quick Start" section above).
 
 | Test | What it verifies | Expected output |
 |------|-----------------|-----------------|
